@@ -8,8 +8,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // newCodeVerifier returns a random PKCE code verifier.
@@ -56,11 +58,10 @@ func buildAuthorizeURL(clientID, state, challenge string) string {
 }
 
 // Login runs the browser-based OAuth PKCE flow.
-// For now it only opens the browser; will complete later.
-func Login(ctx context.Context, clientID string) error {
+func Login(ctx context.Context, clientID string) (Token, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:8888")
 	if err != nil {
-		return fmt.Errorf("start callback server (is port 8888 in use?): %w", err)
+		return Token{}, fmt.Errorf("start callback server (is port 8888 in use?): %w", err)
 	}
 
 	verifier := newCodeVerifier()
@@ -77,10 +78,9 @@ func Login(ctx context.Context, clientID string) error {
 
 	code, err := waitForCode(ctx, ln, state)
 	if err != nil {
-		return err
+		return Token{}, err
 	}
 
-	// TEMP: next step exchanges code + verifier for tokens.
-	fmt.Printf("Got authorization code (%d chars)\n", len(code))
-	return nil
+	hc := &http.Client{Timeout: 15 * time.Second}
+	return exchangeCode(ctx, hc, tokenEndpoint, clientID, code, verifier)
 }

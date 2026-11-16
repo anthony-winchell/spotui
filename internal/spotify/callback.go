@@ -53,7 +53,7 @@ func parseCallback(q url.Values, wantState string) (string, error) {
 	}
 
 	if e := q.Get("error"); e != "" {
-		return "", fmt.Errorf("spotify authorization failed %s", e)
+		return "", fmt.Errorf("spotify authorization failed: %s", e)
 	}
 
 	code := q.Get("code")

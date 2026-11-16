@@ -32,7 +32,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	if err := spotify.Login(ctx, cfg.ClientID); err != nil {
+	tok, err := spotify.Login(ctx, cfg.ClientID)
+	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Printf("logged in; access token expires at %s; scopes %s", tok.Expiry.Format(time.Kitchen), tok.Scope)
 }
