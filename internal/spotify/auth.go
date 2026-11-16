@@ -2,10 +2,12 @@
 package spotify
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 )
@@ -55,18 +57,30 @@ func buildAuthorizeURL(clientID, state, challenge string) string {
 
 // Login runs the browser-based OAuth PKCE flow.
 // For now it only opens the browser; will complete later.
-func Login(clientID string) error {
+func Login(ctx context.Context, clientID string) error {
+	ln, err := net.Listen("tcp", "127.0.0.1:8888")
+	if err != nil {
+		return fmt.Errorf("start callback server (is port 8888 in use?): %w", err)
+	}
+
 	verifier := newCodeVerifier()
 	state := rand.Text()
 	authURL := buildAuthorizeURL(clientID, state, codeChallenge(verifier))
 
 	fmt.Println("Opening your browser to log in to Spotify.")
-	fmt.Println("If it doesn't open, visit this URL: ")
+	fmt.Println("If it doesn't open, visit this URL:")
 	fmt.Println(authURL)
 
 	if err := openBrowser(authURL); err != nil {
 		fmt.Println("Could not open browser:", err)
 	}
 
+	code, err := waitForCode(ctx, ln, state)
+	if err != nil {
+		return err
+	}
+
+	// TEMP: next step exchanges code + verifier for tokens.
+	fmt.Printf("Got authorization code (%d chars)\n", len(code))
 	return nil
 }
