@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/anthony-winchell/spotui/internal/config"
@@ -45,4 +46,33 @@ func main() {
 	}
 
 	fmt.Printf("logged in as %s\n", me.DisplayName)
+
+	st, err := client.Playback(ctx)
+	switch {
+	case errors.Is(err, spotify.ErrNoActiveDevice):
+		fmt.Println("Nothing playing: open spotify and start playback")
+		return
+	case err != nil:
+		log.Fatal(err)
+	case st.Track == nil:
+		fmt.Println("Something is playing, but it isn't a track")
+		return
+	}
+
+	state := "paused"
+
+	if st.Playing {
+		state = "playing"
+	}
+
+	fmt.Printf("%s: %s by %s (%s / %s) on %s, volume %d%%\n",
+		state, st.Track.Name, strings.Join(st.Track.Artists, ", "),
+		mmss(st.ProgressAt(time.Now())), mmss(st.Track.Duration),
+		st.Device.Name, st.Device.Volume)
+}
+
+// mmss formats d as m:ss
+func mmss(d time.Duration) string {
+	d = d.Round(time.Second)
+	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
