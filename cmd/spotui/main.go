@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"time"
@@ -37,5 +38,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("logged in; access token expires at %s; scopes %s", tok.Expiry.Format(time.Kitchen), tok.Scope)
+	client := spotify.NewClient(cfg.ClientID, tok, spotify.KeyringStore{})
+	me, err := client.CurrentUser(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("logged in as %s\n", me.DisplayName)
 }
