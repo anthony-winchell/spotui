@@ -32,7 +32,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	tok, err := spotify.Login(ctx, cfg.ClientID)
+	tok, err := spotify.Authenticate(ctx, cfg.ClientID, spotify.KeyringStore{})
 	if err != nil {
 		log.Fatal(err)
 	}

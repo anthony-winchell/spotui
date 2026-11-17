@@ -111,3 +111,22 @@ func requestToken(ctx context.Context, hc *http.Client, tokenURL string, form ur
 		Scope:        tr.Scope,
 	}, nil
 }
+
+// Spotify may rotate the refresh token; if it doesn't send a new one, the old one stays valid
+func refreshAccessToken(ctx context.Context, hc *http.Client, tokenURL, clientID, refreshToken string) (Token, error) {
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", refreshToken)
+	form.Set("client_id", clientID)
+
+	tok, err := requestToken(ctx, hc, tokenURL, form)
+	if err != nil {
+		return Token{}, err
+	}
+
+	if tok.RefreshToken == "" {
+		tok.RefreshToken = refreshToken
+	}
+
+	return tok, nil
+}

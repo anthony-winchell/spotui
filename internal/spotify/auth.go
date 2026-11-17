@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -83,4 +84,40 @@ func Login(ctx context.Context, clientID string) (Token, error) {
 
 	hc := &http.Client{Timeout: 15 * time.Second}
 	return exchangeCode(ctx, hc, tokenEndpoint, clientID, code, verifier)
+}
+
+// Authenticate returns a valid token, reusing the saved login when possible
+// and failing back to the browser login when there is none or it is revoked.
+func Authenticate(ctx context.Context, clientID string, store TokenStore) (Token, error) {
+	hc := &http.Client{Timeout: 15 * time.Second}
+
+	tok, err := resumeLogin(ctx, hc, clientID, store)
+	if errors.Is(err, ErrNoToken) || isInvalidGrant(err) {
+		tok, err = Login(ctx, clientID)
+	}
+	if err != nil {
+		return Token{}, err
+	}
+
+	if err := store.Save(tok.RefreshToken); err != nil {
+		return Token{}, err
+	}
+
+	return tok, nil
+}
+
+// resumeLogin refreshes the access token using the saved refresh token
+func resumeLogin(ctx context.Context, hc *http.Client, clientID string, store TokenStore) (Token, error) {
+	rt, err := store.Load()
+	if err != nil {
+		return Token{}, err
+	}
+
+	return refreshAccessToken(ctx, hc, tokenEndpoint, clientID, rt)
+}
+
+// isInvalidGrant reports whether Spotify rejected the grant, e.g. a revoked refresh token.
+func isInvalidGrant(err error) bool {
+	var te *TokenError
+	return errors.As(err, &te) && te.Code == "invalid_grant"
 }
