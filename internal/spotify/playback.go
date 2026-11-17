@@ -3,12 +3,18 @@ package spotify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
 )
 
 // ErrNoActiveDevice means no Spotify device is currently active.
 var ErrNoActiveDevice = errors.New("no active Spotify device")
+
+// ErrPremiumRequired means the operation needs a Spotify Premium account
+var ErrPremiumRequired = errors.New("spotify premium required")
 
 // Device is a Spotify Connect playback device.
 type Device struct {
@@ -71,6 +77,55 @@ func (s PlaybackState) ProgressAt(now time.Time) time.Duration {
 	}
 
 	return p
+}
+
+// playerCommand sends a player-control request and maps well-known
+// player failures to sentinel errors
+func (c *Client) playerCommand(ctx context.Context, method, path string, query url.Values) error {
+	err := c.do(ctx, method, path, query, nil, nil)
+
+	var ae *APIError
+	if errors.As(err, &ae) {
+		switch ae.Reason {
+		case "NO_ACTIVE_DEVICE":
+			return fmt.Errorf("%w: %w", ErrNoActiveDevice, err)
+		case "PREMIUM_REQUIRED":
+			return fmt.Errorf("%w: %w", ErrPremiumRequired, err)
+		}
+	}
+
+	return err
+}
+
+func (c *Client) Play(ctx context.Context) error {
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/play", nil)
+}
+
+func (c *Client) Pause(ctx context.Context) error {
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/pause", nil)
+}
+
+func (c *Client) Next(ctx context.Context) error {
+	return c.playerCommand(ctx, http.MethodPost, "/me/player/next", nil)
+}
+
+func (c *Client) Previous(ctx context.Context) error {
+	return c.playerCommand(ctx, http.MethodPost, "/me/player/previous", nil)
+}
+
+func (c *Client) Seek(ctx context.Context, pos time.Duration) error {
+	if pos < 0 {
+		pos = 0
+	}
+
+	q := url.Values{"position_ms": {strconv.FormatInt(pos.Milliseconds(), 10)}}
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/seek", q)
+}
+
+func (c *Client) SetVolume(ctx context.Context, percent int) error {
+	percent = max(0, min(100, percent))
+	q := url.Values{"volume_percent": {strconv.Itoa(percent)}}
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/volume", q)
 }
 
 func (pr *playbackResponse) toState(fetchedAt time.Time) PlaybackState {
