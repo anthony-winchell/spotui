@@ -19,6 +19,10 @@ const requestTimeout = 10 * time.Second
 // syncInterval is how often playback state is re-fetched from Spotify
 const syncInterval = 5 * time.Second
 
+// settleDelay is how long to wait after a command before re-fetching,
+// giving Spotify time to reflect the change
+const settleDelay = time.Second
+
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
@@ -102,6 +106,15 @@ func togglePlayback(c *spotify.Client, playing bool) tea.Cmd {
 	}
 }
 
+// runCommand runs a playback command with a timeout and reports the result
+func runCommand(c *spotify.Client, fn func(context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		return commandDoneMsg{err: fn(ctx)}
+	}
+}
+
 // --- Bubble Tea Interface ------------------------------------------------
 
 // Init runs once at startup; its command loads the initial state
@@ -118,6 +131,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "space":
 			return m, togglePlayback(m.client, m.playback.Playing)
+		case "n":
+			return m, runCommand(m.client, m.client.Next)
+		case "p":
+			return m, runCommand(m.client, m.client.Previous)
 		}
 	case playbackMsg:
 		m.loading = false
@@ -138,7 +155,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playback.Playing = msg.playing
 		m.err = nil
 		m.fetching = true
-		return m, fetchPlaybackAfter(m.client, time.Second)
+		return m, fetchPlaybackAfter(m.client, settleDelay)
+
+	case commandDoneMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		// We can't predict the new track, so ask Spotify once it has settled
+		m.fetching = true
+		return m, fetchPlaybackAfter(m.client, settleDelay)
 
 	case tickMsg:
 		if !m.fetching && time.Time(msg).After(m.nextSync) {
@@ -172,7 +198,7 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&b, "%s %s\n %s\n\n %s / %s", icon, t.Name, strings.Join(t.Artists, ", "), mmss(m.playback.ProgressAt(time.Now())), mmss(t.Duration))
 
 	}
-	b.WriteString("\n\nspace play/pause • q quit")
+	b.WriteString("\n\nspace play/pause • n next • p prev • q quit")
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
