@@ -15,6 +15,8 @@ type callbackResult struct {
 	err  error
 }
 
+var ErrStateMismatch = errors.New("state mismatch: ignoring callback")
+
 // waitForCode serves the OAuth redirect on ln until one callback arrives or ctx ends.
 func waitForCode(ctx context.Context, ln net.Listener, state string) (string, error) {
 	results := make(chan callbackResult, 1)
@@ -22,6 +24,10 @@ func waitForCode(ctx context.Context, ln net.Listener, state string) (string, er
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /callback", func(w http.ResponseWriter, r *http.Request) {
 		code, err := parseCallback(r.URL.Query(), state)
+		if errors.Is(err, ErrStateMismatch) {
+			http.Error(w, "Invalid state", http.StatusBadRequest)
+			return
+		}
 		if err != nil {
 			http.Error(w, "Login failed: "+err.Error(), http.StatusBadRequest)
 		} else {
@@ -49,7 +55,7 @@ func waitForCode(ctx context.Context, ln net.Listener, state string) (string, er
 // parseCallback validates the OAuth redirect query and returns the authorization code.
 func parseCallback(q url.Values, wantState string) (string, error) {
 	if q.Get("state") != wantState {
-		return "", errors.New("state mismatch: ignoring callback")
+		return "", ErrStateMismatch
 	}
 
 	if e := q.Get("error"); e != "" {

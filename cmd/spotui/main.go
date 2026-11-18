@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/anthony-winchell/spotui/internal/config"
 	"github.com/anthony-winchell/spotui/internal/spotify"
+	"github.com/anthony-winchell/spotui/internal/ui"
 	"github.com/joho/godotenv"
 )
 
@@ -48,12 +50,14 @@ func main() {
 	}
 	fmt.Printf("logged in as %s\n", me.DisplayName)
 
-	var cmdErr error
-	if args := os.Args[1:]; len(args) == 0 {
-		cmdErr = printStatus(ctx, client)
-	} else {
-		cmdErr = runCommand(ctx, client, args)
+	if len(os.Args) == 1 {
+		if _, err := tea.NewProgram(ui.New(client)).Run(); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
+
+	cmdErr := runCommand(ctx, client, os.Args[1:])
 
 	switch {
 	case errors.Is(cmdErr, spotify.ErrNoActiveDevice):
