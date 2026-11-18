@@ -33,6 +33,18 @@ const volumeDebounce = 300 * time.Millisecond
 // for Spotify to report it back
 const volumeConfirmTimeout = 5 * time.Second
 
+// seekStep is how far h/l jumps
+const seekStep = 5 * time.Second
+
+// seekDebounce is how long seek keys must be idle before we send a request
+const seekDebounce = 300 * time.Millisecond
+
+// seekConfirmTimeout is how long our local position wins while waiting for Spotify
+const seekConfirmTimeout = 5 * time.Second
+
+// seekTolerance is how close a fetched position must be to ours to count as confirmed
+const seekTolerance = 1500 * time.Millisecond
+
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
@@ -41,9 +53,12 @@ type Model struct {
 	loading  bool
 	err      error
 
-	volumeSeq     int       // increments on each volume key; used to debounce requests
-	pendingVolume int       // volume we requested that Spotify hasn't confirmed yet
-	pendingUntil  time.Time // stop waiting for confirmation after this; zero = nothing pending
+	volumeSeq          int       // increments on each volume key; used to debounce requests
+	pendingVolume      int       // volume we requested that Spotify hasn't confirmed yet
+	volumePendingUntil time.Time // stop waiting for confirmation after this; zero = nothing pending
+
+	seekSeq          int       // increments on each seek key; used to debounce requests
+	seekPendingUntil time.Time // until then, our local position wins; zero = nothing pending
 
 	fetching bool      // a playback fetch is in flight
 	nextSync time.Time // earliest time for the next periodic fetch
@@ -81,7 +96,13 @@ type commandDoneMsg struct {
 	err error
 }
 
+// volumeFlushMsg fires after a volume key press; only the latest one is acted on
 type volumeFlushMsg struct {
+	seq int
+}
+
+// seekFlushMsg fires after a seek key press; only the latest one is acted on
+type seekFlushMsg struct {
 	seq int
 }
 
@@ -153,24 +174,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, runCommand(m.client, m.client.Next)
 		case "p":
 			return m, runCommand(m.client, m.client.Previous)
-		case "+", "=":
-			return m.changeVolume(volumeStep)
 		case "-":
 			return m.changeVolume(-volumeStep)
+		case "+", "=":
+			return m.changeVolume(volumeStep)
+		case "h":
+			return m.seek(-seekStep)
+		case "l":
+			return m.seek(seekStep)
 		}
 	case playbackMsg:
+		now := time.Now()
 		m.loading = false
 		m.fetching = false
+		prev := m.playback
 		m.playback = msg.state
-		if time.Now().Before(m.pendingUntil) {
+		if now.Before(m.volumePendingUntil) {
 			if m.playback.Device.Volume == m.pendingVolume {
-				m.pendingUntil = time.Time{} // Spotify caught up
+				m.volumePendingUntil = time.Time{} // Spotify caught up
 			} else {
 				m.playback.Device.Volume = m.pendingVolume // not yet; keep ours
 			}
 		}
+
+		if now.Before(m.seekPendingUntil) {
+			ours := prev.ProgressAt(now)
+			theirs := m.playback.ProgressAt(now)
+			switch {
+			case !sameTrack(prev, m.playback):
+				m.seekPendingUntil = time.Time{} // track changed; our seek no longer applies
+			case (theirs - ours).Abs() < seekTolerance:
+				m.seekPendingUntil = time.Time{} // Spotify caught up
+			default:
+				m.playback.Progress = ours // not yet; keep ours
+				m.playback.FetchedAt = now
+			}
+		}
+
 		m.err = msg.err
-		m.nextSync = time.Now().Add(syncDelay(msg.err))
+		m.nextSync = now.Add(syncDelay(msg.err))
 
 	case toggledMsg:
 		if msg.err != nil {
@@ -210,6 +252,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, runCommand(m.client, func(ctx context.Context) error {
 			return m.client.SetVolume(ctx, vol)
 		})
+	case seekFlushMsg:
+		if msg.seq != m.seekSeq {
+			return m, nil // a newer key press superseded this one
+		}
+		pos := m.playback.ProgressAt(time.Now())
+		return m, runCommand(m.client, func(ctx context.Context) error {
+			return m.client.Seek(ctx, pos)
+		})
 	}
 	return m, nil
 }
@@ -224,11 +274,30 @@ func (m Model) changeVolume(delta int) (Model, tea.Cmd) {
 	m.volumeSeq++
 
 	m.pendingVolume = m.playback.Device.Volume
-	m.pendingUntil = time.Now().Add(volumeDebounce + volumeConfirmTimeout)
+	m.volumePendingUntil = time.Now().Add(volumeDebounce + volumeConfirmTimeout)
 
 	seq := m.volumeSeq
 	return m, tea.Tick(volumeDebounce, func(time.Time) tea.Msg {
 		return volumeFlushMsg{seq: seq}
+	})
+}
+
+// seek moves the position locally by delta and schedules a debounced send
+func (m Model) seek(delta time.Duration) (Model, tea.Cmd) {
+	t := m.playback.Track
+	if t == nil {
+		return m, nil
+	}
+
+	now := time.Now()
+	m.playback.Progress = max(0, min(t.Duration, m.playback.ProgressAt(now)+delta))
+	m.playback.FetchedAt = now // ProgressAt counts forward from here
+
+	m.seekSeq++
+	m.seekPendingUntil = now.Add(seekDebounce + seekConfirmTimeout)
+	seq := m.seekSeq
+	return m, tea.Tick(seekDebounce, func(time.Time) tea.Msg {
+		return seekFlushMsg{seq: seq}
 	})
 }
 
@@ -257,7 +326,7 @@ func (m Model) View() tea.View {
 		}
 
 	}
-	b.WriteString("\n\nspace play/pause • n next • p prev • +/- vol • q quit")
+	b.WriteString("\n\nspace play/pause • n next • p prev • h/l seek • +/- vol • q quit")
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
@@ -278,4 +347,9 @@ func syncDelay(err error) time.Duration {
 	}
 
 	return syncInterval
+}
+
+// sameTrack reports whether a and b are playing the same track
+func sameTrack(a, b spotify.PlaybackState) bool {
+	return a.Track != nil && b.Track != nil && a.Track.ID == b.Track.ID
 }
