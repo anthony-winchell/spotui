@@ -23,24 +23,17 @@ const syncInterval = 5 * time.Second
 // giving Spotify time to reflect the change
 const settleDelay = time.Second
 
+// keyDebounce is how long repeatable keys (volume, seek) must be idle before we send a request
+const keyDebounce = 300 * time.Millisecond
+
+// confirmTimeout is how long a local change wins over fetched state while waiting for Spotify
+const confirmTimeout = 5 * time.Second
+
 // volumeStep is how much +/- changes the volume, in percent
 const volumeStep = 5
 
-// volumeDebounce is how long volume keys must be ide before we send a request
-const volumeDebounce = 300 * time.Millisecond
-
-// volumeConfirmTimeout is how long we keep our local volume while waiting
-// for Spotify to report it back
-const volumeConfirmTimeout = 5 * time.Second
-
 // seekStep is how far h/l jumps
 const seekStep = 5 * time.Second
-
-// seekDebounce is how long seek keys must be idle before we send a request
-const seekDebounce = 300 * time.Millisecond
-
-// seekConfirmTimeout is how long our local position wins while waiting for Spotify
-const seekConfirmTimeout = 5 * time.Second
 
 // seekTolerance is how close a fetched position must be to ours to count as confirmed
 const seekTolerance = 1500 * time.Millisecond
@@ -53,12 +46,9 @@ type Model struct {
 	loading  bool
 	err      error
 
-	volumeSeq          int       // increments on each volume key; used to debounce requests
-	pendingVolume      int       // volume we requested that Spotify hasn't confirmed yet
-	volumePendingUntil time.Time // stop waiting for confirmation after this; zero = nothing pending
-
-	seekSeq          int       // increments on each seek key; used to debounce requests
-	seekPendingUntil time.Time // until then, our local position wins; zero = nothing pending
+	volPending  pending // local volume change awaiting confirmation
+	seekPending pending // local seek awaiting confirmation
+	playPending pending // local play/pause awaiting confirmation
 
 	fetching bool      // a playback fetch is in flight
 	nextSync time.Time // earliest time for the next periodic fetch
@@ -85,7 +75,7 @@ type playbackMsg struct {
 	err   error
 }
 
-// toggleMsg reports the result of a play/pause command
+// toggledMsg reports the result of a play/pause command
 type toggledMsg struct {
 	playing bool
 	err     error
@@ -120,7 +110,7 @@ func fetchPlayback(c *spotify.Client) tea.Cmd {
 }
 
 // fetchPlaybackAfter waits d, then fetches playback state
-// The delay gives Spotify time to reflext a command we just sent
+// The delay gives Spotify time to reflect a command we just sent
 func fetchPlaybackAfter(c *spotify.Client, d time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(d)
@@ -189,28 +179,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.fetching = false
 		prev := m.playback
 		m.playback = msg.state
-		if now.Before(m.volumePendingUntil) {
-			if m.playback.Device.Volume == m.pendingVolume {
-				m.volumePendingUntil = time.Time{} // Spotify caught up
-			} else {
-				m.playback.Device.Volume = m.pendingVolume // not yet; keep ours
-			}
-		}
-
-		if now.Before(m.seekPendingUntil) {
-			ours := prev.ProgressAt(now)
-			theirs := m.playback.ProgressAt(now)
-			switch {
-			case !sameTrack(prev, m.playback):
-				m.seekPendingUntil = time.Time{} // track changed; our seek no longer applies
-			case (theirs - ours).Abs() < seekTolerance:
-				m.seekPendingUntil = time.Time{} // Spotify caught up
-			default:
-				m.playback.Progress = ours // not yet; keep ours
-				m.playback.FetchedAt = now
-			}
-		}
-
+		m.reconcile(prev, now)
 		m.err = msg.err
 		m.nextSync = now.Add(syncDelay(msg.err))
 
@@ -224,6 +193,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playback.Progress = m.playback.ProgressAt(now)
 		m.playback.FetchedAt = now
 		m.playback.Playing = msg.playing
+		m.playPending.start(confirmTimeout)
 		m.err = nil
 		m.fetching = true
 		return m, fetchPlaybackAfter(m.client, settleDelay)
@@ -245,7 +215,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tick()
 
 	case volumeFlushMsg:
-		if msg.seq != m.volumeSeq {
+		if msg.seq != m.volPending.seq {
 			return m, nil // a newer key press superseded this one
 		}
 		vol := m.playback.Device.Volume
@@ -253,7 +223,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.client.SetVolume(ctx, vol)
 		})
 	case seekFlushMsg:
-		if msg.seq != m.seekSeq {
+		if msg.seq != m.seekPending.seq {
 			return m, nil // a newer key press superseded this one
 		}
 		pos := m.playback.ProgressAt(time.Now())
@@ -271,13 +241,8 @@ func (m Model) changeVolume(delta int) (Model, tea.Cmd) {
 	}
 
 	m.playback.Device.Volume = max(0, min(100, m.playback.Device.Volume+delta))
-	m.volumeSeq++
-
-	m.pendingVolume = m.playback.Device.Volume
-	m.volumePendingUntil = time.Now().Add(volumeDebounce + volumeConfirmTimeout)
-
-	seq := m.volumeSeq
-	return m, tea.Tick(volumeDebounce, func(time.Time) tea.Msg {
+	seq := m.volPending.start(keyDebounce + confirmTimeout)
+	return m, tea.Tick(keyDebounce, func(time.Time) tea.Msg {
 		return volumeFlushMsg{seq: seq}
 	})
 }
@@ -293,12 +258,62 @@ func (m Model) seek(delta time.Duration) (Model, tea.Cmd) {
 	m.playback.Progress = max(0, min(t.Duration, m.playback.ProgressAt(now)+delta))
 	m.playback.FetchedAt = now // ProgressAt counts forward from here
 
-	m.seekSeq++
-	m.seekPendingUntil = now.Add(seekDebounce + seekConfirmTimeout)
-	seq := m.seekSeq
-	return m, tea.Tick(seekDebounce, func(time.Time) tea.Msg {
+	seq := m.seekPending.start(keyDebounce + confirmTimeout)
+	return m, tea.Tick(keyDebounce, func(time.Time) tea.Msg {
 		return seekFlushMsg{seq: seq}
 	})
+}
+
+// reconcile keeps local changes that Spotify hasn't confirmed yet.
+// prev is the state before this fetch; it still holds our pending values
+func (m *Model) reconcile(prev spotify.PlaybackState, now time.Time) {
+	m.reconcilePlay(prev, now)
+	m.reconcileVolume(prev, now)
+	m.reconcileSeek(prev, now)
+}
+
+func (m *Model) reconcileVolume(prev spotify.PlaybackState, now time.Time) {
+	if !m.volPending.active(now) {
+		return
+	}
+
+	if m.playback.Device.Volume == prev.Device.Volume {
+		m.volPending.confirm() // Spotify caught up
+		return
+	}
+
+	m.playback.Device.Volume = prev.Device.Volume // not yet; keep ours
+}
+
+func (m *Model) reconcileSeek(prev spotify.PlaybackState, now time.Time) {
+	if !m.seekPending.active(now) {
+		return
+	}
+
+	ours := prev.ProgressAt(now)
+	theirs := m.playback.ProgressAt(now)
+	switch {
+	case !sameTrack(prev, m.playback):
+		m.seekPending.confirm() // track changed; our seek no longer applies
+	case (theirs - ours).Abs() < seekTolerance:
+		m.seekPending.confirm() // Spotify caught up
+	default:
+		m.playback.Progress = ours // not yet; keep
+		m.playback.FetchedAt = now
+	}
+}
+
+func (m *Model) reconcilePlay(prev spotify.PlaybackState, now time.Time) {
+	if !m.playPending.active(now) {
+		return
+	}
+
+	if m.playback.Playing == prev.Playing {
+		m.playPending.confirm() // Spotify caught up
+		return
+	}
+
+	m.playback.Playing = prev.Playing
 }
 
 // View renders the model
