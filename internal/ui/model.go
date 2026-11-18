@@ -23,6 +23,16 @@ const syncInterval = 5 * time.Second
 // giving Spotify time to reflect the change
 const settleDelay = time.Second
 
+// volumeStep is how much +/- changes the volume, in percent
+const volumeStep = 5
+
+// volumeDebounce is how long volume keys must be ide before we send a request
+const volumeDebounce = 300 * time.Millisecond
+
+// volumeConfirmTimeout is how long we keep our local volume while waiting
+// for Spotify to report it back
+const volumeConfirmTimeout = 5 * time.Second
+
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
@@ -30,6 +40,10 @@ type Model struct {
 	playback spotify.PlaybackState
 	loading  bool
 	err      error
+
+	volumeSeq     int       // increments on each volume key; used to debounce requests
+	pendingVolume int       // volume we requested that Spotify hasn't confirmed yet
+	pendingUntil  time.Time // stop waiting for confirmation after this; zero = nothing pending
 
 	fetching bool      // a playback fetch is in flight
 	nextSync time.Time // earliest time for the next periodic fetch
@@ -65,6 +79,10 @@ type toggledMsg struct {
 // commandDoneMsg reports that a playback command finished
 type commandDoneMsg struct {
 	err error
+}
+
+type volumeFlushMsg struct {
+	seq int
 }
 
 // --- Commands ------------------------------------------------
@@ -135,11 +153,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, runCommand(m.client, m.client.Next)
 		case "p":
 			return m, runCommand(m.client, m.client.Previous)
+		case "+", "=":
+			return m.changeVolume(volumeStep)
+		case "-":
+			return m.changeVolume(-volumeStep)
 		}
 	case playbackMsg:
 		m.loading = false
 		m.fetching = false
 		m.playback = msg.state
+		if time.Now().Before(m.pendingUntil) {
+			if m.playback.Device.Volume == m.pendingVolume {
+				m.pendingUntil = time.Time{} // Spotify caught up
+			} else {
+				m.playback.Device.Volume = m.pendingVolume // not yet; keep ours
+			}
+		}
 		m.err = msg.err
 		m.nextSync = time.Now().Add(syncDelay(msg.err))
 
@@ -172,8 +201,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(tick(), fetchPlayback(m.client))
 		}
 		return m, tick()
+
+	case volumeFlushMsg:
+		if msg.seq != m.volumeSeq {
+			return m, nil // a newer key press superseded this one
+		}
+		vol := m.playback.Device.Volume
+		return m, runCommand(m.client, func(ctx context.Context) error {
+			return m.client.SetVolume(ctx, vol)
+		})
 	}
 	return m, nil
+}
+
+// changeVolume applies a volume change locally and schedules a debounced send
+func (m Model) changeVolume(delta int) (Model, tea.Cmd) {
+	if !m.playback.Device.SupportsVolume {
+		return m, nil
+	}
+
+	m.playback.Device.Volume = max(0, min(100, m.playback.Device.Volume+delta))
+	m.volumeSeq++
+
+	m.pendingVolume = m.playback.Device.Volume
+	m.pendingUntil = time.Now().Add(volumeDebounce + volumeConfirmTimeout)
+
+	seq := m.volumeSeq
+	return m, tea.Tick(volumeDebounce, func(time.Time) tea.Msg {
+		return volumeFlushMsg{seq: seq}
+	})
 }
 
 // View renders the model
@@ -196,9 +252,12 @@ func (m Model) View() tea.View {
 			icon = "▶"
 		}
 		fmt.Fprintf(&b, "%s %s\n %s\n\n %s / %s", icon, t.Name, strings.Join(t.Artists, ", "), mmss(m.playback.ProgressAt(time.Now())), mmss(t.Duration))
+		if d := m.playback.Device; d.SupportsVolume {
+			fmt.Fprintf(&b, "\n %s • vol %d%%", d.Name, d.Volume)
+		}
 
 	}
-	b.WriteString("\n\nspace play/pause • n next • p prev • q quit")
+	b.WriteString("\n\nspace play/pause • n next • p prev • +/- vol • q quit")
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
