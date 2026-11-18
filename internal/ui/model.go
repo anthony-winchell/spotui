@@ -16,6 +16,9 @@ import (
 // requestTimeout bounds each Spotify call made from the UI
 const requestTimeout = 10 * time.Second
 
+// syncInterval is how often playback state is re-fetched from Spotify
+const syncInterval = 5 * time.Second
+
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
@@ -23,11 +26,22 @@ type Model struct {
 	playback spotify.PlaybackState
 	loading  bool
 	err      error
+
+	fetching bool      // a playback fetch is in flight
+	nextSync time.Time // earliest time for the next periodic fetch
+}
+
+// tickMsg is sent once per second to redraw progress and drive sync
+type tickMsg time.Time
+
+// tick schedules the next tickMsg
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 // New returns the initial Model
 func New(client *spotify.Client) Model {
-	return Model{client: client, loading: true}
+	return Model{client: client, loading: true, fetching: true} // Init starts a fetch
 }
 
 // --- Messages ------------------------------------------------
@@ -84,7 +98,7 @@ func togglePlayback(c *spotify.Client, playing bool) tea.Cmd {
 			err = c.Play(ctx)
 		}
 
-		return toggledMsg{playing: playing, err: err}
+		return toggledMsg{playing: !playing, err: err}
 	}
 }
 
@@ -92,7 +106,7 @@ func togglePlayback(c *spotify.Client, playing bool) tea.Cmd {
 
 // Init runs once at startup; its command loads the initial state
 func (m Model) Init() tea.Cmd {
-	return fetchPlayback(m.client)
+	return tea.Batch(fetchPlayback(m.client), tick())
 }
 
 // Update applies one message to the model
@@ -107,8 +121,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case playbackMsg:
 		m.loading = false
+		m.fetching = false
 		m.playback = msg.state
 		m.err = msg.err
+		m.nextSync = time.Now().Add(syncDelay(msg.err))
 
 	case toggledMsg:
 		if msg.err != nil {
@@ -121,8 +137,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playback.FetchedAt = now
 		m.playback.Playing = msg.playing
 		m.err = nil
+		m.fetching = true
 		return m, fetchPlaybackAfter(m.client, time.Second)
 
+	case tickMsg:
+		if !m.fetching && time.Time(msg).After(m.nextSync) {
+			m.fetching = true
+			return m, tea.Batch(tick(), fetchPlayback(m.client))
+		}
+		return m, tick()
 	}
 	return m, nil
 }
@@ -159,4 +182,15 @@ func (m Model) View() tea.View {
 func mmss(d time.Duration) string {
 	d = d.Round(time.Second)
 	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+// syncDelay returns how long to wait before the next periodic sync,
+// honoring Spotify's Retry-After when rate-limited.
+func syncDelay(err error) time.Duration {
+	var ae *spotify.APIError
+	if errors.As(err, &ae) && ae.RetryAfter > syncInterval {
+		return ae.RetryAfter
+	}
+
+	return syncInterval
 }
