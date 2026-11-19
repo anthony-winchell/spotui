@@ -72,6 +72,8 @@ func main() {
 // runCommand runs one playback command from the command line.
 func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 	switch args[0] {
+	case "status":
+		return printStatus(ctx, c)
 	case "play":
 		return c.Play(ctx)
 	case "pause":
@@ -101,6 +103,10 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 			return err
 		}
 		return c.SetVolume(ctx, pct)
+	case "playlists":
+		return printPlaylists(ctx, c)
+	case "liked":
+		return printLikedSongs(ctx, c)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -137,6 +143,45 @@ func printStatus(ctx context.Context, c *spotify.Client) error {
 		state, st.Track.Name, strings.Join(st.Track.Artists, ", "),
 		mmss(st.ProgressAt(time.Now())), mmss(st.Track.Duration),
 		st.Device.Name, st.Device.Volume)
+	return nil
+}
+
+// printPlaylists prints all of the user's playlists, fetching every page
+func printPlaylists(ctx context.Context, c *spotify.Client) error {
+	offset := 0
+	for {
+		page, err := c.Playlists(ctx, offset)
+		if err != nil {
+			return err
+		}
+
+		for i, p := range page.Items {
+			count := "?"
+			if p.TrackCount >= 0 {
+				count = strconv.Itoa(p.TrackCount)
+			}
+			fmt.Printf("%3d. %s (%s tracks, by %s)\n", page.Offset+i+1, p.Name, count, p.OwnerName)
+		}
+
+		if !page.HasNext || len(page.Items) == 0 {
+			return nil
+		}
+		offset += len(page.Items)
+	}
+}
+
+// printLikedSongs prints the first page of the user's LikedSongs
+func printLikedSongs(ctx context.Context, c *spotify.Client) error {
+	page, err := c.LikedSongs(ctx, 0)
+	if err != nil {
+		return err
+	}
+
+	for i, t := range page.Items {
+		fmt.Printf("%3d. %s by %s (%s)\n", i+1, t.Name, strings.Join(t.Artists, ", "), mmss(t.Duration))
+	}
+
+	fmt.Printf("showing %d of %d liked songs\n", len(page.Items), page.Total)
 	return nil
 }
 

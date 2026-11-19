@@ -162,7 +162,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, togglePlayback(m.client, m.playback.Playing)
 		case "n":
 			return m, runCommand(m.client, m.client.Next)
-		case "p":
+		case "N":
 			return m, runCommand(m.client, m.client.Previous)
 		case "-":
 			return m.changeVolume(-volumeStep)
@@ -341,7 +341,7 @@ func (m Model) View() tea.View {
 		}
 
 	}
-	b.WriteString("\n\nspace play/pause • n next • p prev • h/l seek • +/- vol • q quit")
+	b.WriteString("\n\nspace play/pause • n next • N prev • h/l seek • +/- vol • q quit")
 	v := tea.NewView(b.String())
 	v.AltScreen = true
 	return v
