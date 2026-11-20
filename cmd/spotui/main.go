@@ -105,8 +105,21 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		return c.SetVolume(ctx, pct)
 	case "playlists":
 		return printPlaylists(ctx, c)
+	case "playlist":
+		n, err := intArg(args)
+		if err != nil {
+			return err
+		}
+		return playPlaylist(ctx, c, n)
 	case "liked":
-		return printLikedSongs(ctx, c)
+		if len(args) == 1 {
+			return printLikedSongs(ctx, c)
+		}
+		n, err := intArg(args)
+		if err != nil {
+			return err
+		}
+		return playLikedSongs(ctx, c, n)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -170,6 +183,26 @@ func printPlaylists(ctx context.Context, c *spotify.Client) error {
 	}
 }
 
+// playPlaylist plays the nth playlist (1-based), numbered as printPlaylists shows them
+func playPlaylist(ctx context.Context, c *spotify.Client, n int) error {
+	if n < 1 {
+		return fmt.Errorf("playlist numbers start at 1")
+	}
+
+	page, err := c.Playlists(ctx, n-1)
+	if err != nil {
+		return err
+	}
+
+	if len(page.Items) == 0 {
+		return fmt.Errorf("no playlist %d: you have %d", n, page.Total)
+	}
+
+	p := page.Items[0]
+	fmt.Printf("playing %s\n", p.Name)
+	return c.PlayContext(ctx, p.URI, 0)
+}
+
 // printLikedSongs prints the first page of the user's LikedSongs
 func printLikedSongs(ctx context.Context, c *spotify.Client) error {
 	page, err := c.LikedSongs(ctx, 0)
@@ -183,6 +216,31 @@ func printLikedSongs(ctx context.Context, c *spotify.Client) error {
 
 	fmt.Printf("showing %d of %d liked songs\n", len(page.Items), page.Total)
 	return nil
+}
+
+// playLikedSongs plays up to one page of Liked Songs, starting at song n (1-based)
+func playLikedSongs(ctx context.Context, c *spotify.Client, n int) error {
+	if n < 1 {
+		return fmt.Errorf("song numbers start at 1")
+	}
+
+	page, err := c.LikedSongs(ctx, n-1)
+	if err != nil {
+		return err
+	}
+
+	if len(page.Items) == 0 {
+		return fmt.Errorf("no liked song %d: you have %d", n, page.Total)
+	}
+
+	uris := make([]string, len(page.Items))
+	for i, t := range page.Items {
+		uris[i] = t.URI
+	}
+
+	first := page.Items[0]
+	fmt.Printf("playing %s by %s (+%d more)", first.Name, strings.Join(first.Artists, ", "), len(uris)+1)
+	return c.PlayTracks(ctx, uris, 0)
 }
 
 // mmss formats d as m:ss
