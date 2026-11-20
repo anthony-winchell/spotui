@@ -120,6 +120,8 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 			return err
 		}
 		return playLikedSongs(ctx, c, n)
+	case "recent":
+		return printRecent(ctx, c)
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -241,6 +243,24 @@ func playLikedSongs(ctx context.Context, c *spotify.Client, n int) error {
 	first := page.Items[0]
 	fmt.Printf("playing %s by %s (+%d more)", first.Name, strings.Join(first.Artists, ", "), len(uris)+1)
 	return c.PlayTracks(ctx, uris, 0)
+}
+
+// printRecent prints the user's recently played tracks, newest first
+func printRecent(ctx context.Context, c *spotify.Client) error {
+	plays, err := c.RecentlyPlayed(ctx)
+	if err != nil {
+		return err
+	}
+	if len(plays) == 0 {
+		fmt.Println("no recently played tracks")
+		return nil
+	}
+
+	for i, p := range plays {
+		fmt.Printf("%3d. %s %s by %s\n", i+1, p.PlayedAt.Local().Format("Mon 15:04"), p.Track.Name, strings.Join(p.Track.Artists, ", "))
+	}
+
+	return nil
 }
 
 // mmss formats d as m:ss
