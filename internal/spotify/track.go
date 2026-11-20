@@ -14,29 +14,22 @@ type Track struct {
 
 // trackObject is Spotify's JSON track object, shared by many endpoints
 type trackObject struct {
-	ID         string `json:"id"`
-	URI        string `json:"uri"`
-	Name       string `json:"name"`
-	DurationMS int    `json:"duration_ms"`
-	Artists    []struct {
-		Name string `json:"name"`
-	} `json:"artists"`
-	Album struct {
+	ID         string         `json:"id"`
+	URI        string         `json:"uri"`
+	Name       string         `json:"name"`
+	DurationMS int            `json:"duration_ms"`
+	Artists    []artistObject `json:"artists"`
+	Album      struct {
 		Name string `json:"name"`
 	} `json:"album"`
 }
 
 func (t trackObject) toTrack() Track {
-	artists := make([]string, len(t.Artists))
-	for i, a := range t.Artists {
-		artists[i] = a.Name
-	}
-
 	return Track{
 		ID:       t.ID,
 		URI:      t.URI,
 		Name:     t.Name,
-		Artists:  artists,
+		Artists:  artistNames(t.Artists),
 		Album:    t.Album.Name,
 		Duration: time.Duration(t.DurationMS) * time.Millisecond,
 	}

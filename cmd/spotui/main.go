@@ -122,6 +122,11 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		return playLikedSongs(ctx, c, n)
 	case "recent":
 		return printRecent(ctx, c)
+	case "search":
+		if len(args) < 2 {
+			return fmt.Errorf("search needs a query")
+		}
+		return printSearch(ctx, c, strings.Join(args[1:], " "))
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -258,6 +263,31 @@ func printRecent(ctx context.Context, c *spotify.Client) error {
 
 	for i, p := range plays {
 		fmt.Printf("%3d. %s %s by %s\n", i+1, p.PlayedAt.Local().Format("Mon 15:04"), p.Track.Name, strings.Join(p.Track.Artists, ", "))
+	}
+
+	return nil
+}
+
+// printSearch prints the first page of each search result type
+func printSearch(ctx context.Context, c *spotify.Client, query string) error {
+	res, err := c.Search(ctx, query, 0)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Tracks (%d):\n", res.Tracks.Total)
+	for i, t := range res.Tracks.Items {
+		fmt.Printf("%3d. %s by %s\n", i+1, t.Name, strings.Join(t.Artists, ", "))
+	}
+
+	fmt.Printf("\nArtists (%d):\n", res.Artists.Total)
+	for i, a := range res.Artists.Items {
+		fmt.Printf("%3d. %s\n", i+1, a.Name)
+	}
+
+	fmt.Printf("\nAlbums (%d):\n", res.Albums.Total)
+	for i, a := range res.Albums.Items {
+		fmt.Printf("%3d. %s by %s\n", i+1, a.Name, strings.Join(a.Artists, ", "))
 	}
 
 	return nil
