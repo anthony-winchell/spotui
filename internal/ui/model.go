@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/anthony-winchell/spotui/internal/spotify"
 )
@@ -52,6 +53,8 @@ type Model struct {
 
 	fetching bool      // a playback fetch is in flight
 	nextSync time.Time // earliest time for the next periodic fetch
+
+	width, height int // terminal size, from tea.WindowSizeMsg
 }
 
 // tickMsg is sent once per second to redraw progress and drive sync
@@ -154,6 +157,9 @@ func (m Model) Init() tea.Cmd {
 // Update applies one message to the model
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -318,33 +324,49 @@ func (m *Model) reconcilePlay(prev spotify.PlaybackState, now time.Time) {
 
 // View renders the model
 func (m Model) View() tea.View {
-	var b strings.Builder
+	body := m.nowPlaying()
 
-	switch {
-	case m.loading:
-		b.WriteString("Loading...")
-	case errors.Is(m.err, spotify.ErrNoActiveDevice):
-		b.WriteString("No active device. Open Spotify and start playing something.")
-	case m.err != nil:
-		fmt.Fprintf(&b, "Error: %v", m.err)
-	case m.playback.Track == nil:
-		b.WriteString("Nothing playing.")
-	default:
-		t := m.playback.Track
-		icon := "⏸"
-		if m.playback.Playing {
-			icon = "▶"
-		}
-		fmt.Fprintf(&b, "%s %s\n %s\n\n %s / %s", icon, t.Name, strings.Join(t.Artists, ", "), mmss(m.playback.ProgressAt(time.Now())), mmss(t.Duration))
-		if d := m.playback.Device; d.SupportsVolume {
-			fmt.Fprintf(&b, "\n %s • vol %d%%", d.Name, d.Volume)
-		}
+	hints := dimStyle.Render("space play/pause • n next • N prev • h/l seek • +/- vol • q quit")
 
-	}
-	b.WriteString("\n\nspace play/pause • n next • N prev • h/l seek • +/- vol • q quit")
-	v := tea.NewView(b.String())
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, panelStyle.Width(m.width).Render(body), hints))
 	v.AltScreen = true
 	return v
+}
+
+// nowPlaying renders the content of the bottom panel
+func (m Model) nowPlaying() string {
+	switch {
+	case m.loading:
+		return dimStyle.Render("Loading...")
+	case errors.Is(m.err, spotify.ErrNoActiveDevice):
+		return dimStyle.Render("No active device. Open Spotify and start playing something.")
+	case m.err != nil:
+		return errorStyle.Render("Error: " + m.err.Error())
+	case m.playback.Track == nil:
+		return dimStyle.Render("Nothing playing.")
+	}
+	t := m.playback.Track
+	icon := "⏸"
+	if m.playback.Playing {
+		icon = lipgloss.NewStyle().Foreground(colorGreen).Render("▶")
+	}
+	pos := m.playback.ProgressAt(time.Now())
+
+	times := fmt.Sprintf(" %s / %s", mmss(pos), mmss(t.Duration))
+	inner := m.width - panelStyle.GetHorizontalFrameSize() // minus border + padding
+	bar := progressBar(pos, t.Duration, inner-lipgloss.Width(times))
+
+	lines := []string{
+		icon + " " + titleStyle.Render(t.Name),
+		artistStyle.Render(strings.Join(t.Artists, ", ")),
+		bar + times,
+	}
+
+	if d := m.playback.Device; d.SupportsVolume {
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("%s • vol %d%%", d.Name, d.Volume)))
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // mmss formats d as m:ss

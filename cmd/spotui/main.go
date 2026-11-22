@@ -246,7 +246,7 @@ func playLikedSongs(ctx context.Context, c *spotify.Client, n int) error {
 	}
 
 	first := page.Items[0]
-	fmt.Printf("playing %s by %s (+%d more)", first.Name, strings.Join(first.Artists, ", "), len(uris)+1)
+	fmt.Printf("playing %s by %s (+%d more)\n", first.Name, strings.Join(first.Artists, ", "), len(uris)-1)
 	return c.PlayTracks(ctx, uris, 0)
 }
 

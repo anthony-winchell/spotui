@@ -4,6 +4,7 @@ go 1.27.4
 
 require (
 	charm.land/bubbletea/v2 v2.1.1
+	charm.land/lipgloss/v2 v2.1.1
 	github.com/BurntSushi/toml v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/zalando/go-keyring v0.2.8
