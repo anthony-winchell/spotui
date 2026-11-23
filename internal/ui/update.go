@@ -30,24 +30,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.changeVolume(-volumeStep)
 		case "+", "=":
 			return m.changeVolume(volumeStep)
-		case "h":
+		case ",":
 			return m.seek(-seekStep)
-		case "l":
+		case ".":
 			return m.seek(seekStep)
+		case "h", "esc":
+			m.focus = focusSidebar
+		case "l", "enter":
+			m.focus = focusMain
 		case "j":
-			m.active = min(m.active+1, sectionCount-1)
+			if m.focus == focusSidebar {
+				m.active = min(m.active+1, sectionCount-1)
+			}
 		case "k":
-			m.active = max(m.active-1, 0)
+			if m.focus == focusSidebar {
+				m.active = max(m.active-1, 0)
+			}
 		}
 	case playbackMsg:
 		now := time.Now()
 		m.loading = false
 		m.fetching = false
-		prev := m.playback
-		m.playback = msg.state
-		m.reconcile(prev, now)
 		m.err = msg.err
 		m.nextSync = now.Add(syncDelay(msg.err))
+		switch {
+		case msg.err == nil:
+			prev := m.playback
+			m.playback = msg.state
+			m.reconcile(prev, now)
+		case errors.Is(msg.err, spotify.ErrNoActiveDevice):
+			m.playback = spotify.PlaybackState{} // Spotify says nothing is playing
+		}
 
 	case toggledMsg:
 		if msg.err != nil {

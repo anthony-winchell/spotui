@@ -18,13 +18,15 @@ const sidebarWidth = 22
 // View renders the model
 func (m Model) View() tea.View {
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
-	hints := dimStyle.Render("j/k move • space play/pause • n next • N prev • h/l seek • +/- vol • q quit")
+	hints := dimStyle.Render("h/l panels • j/k move • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit")
 
-	// Whatever height is left ver after the bottom rows goes to the top row
+	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
 	mainWidth := max(0, m.width-sidebarWidth)
 
-	top := lipgloss.JoinHorizontal(lipgloss.Top, panelStyle.Width(sidebarWidth).Height(topHeight).Render(m.sidebar()), panelStyle.Width(mainWidth).Height(topHeight).Render(m.mainPanel()))
+	top := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.panel(focusSidebar).Width(sidebarWidth).Height(topHeight).Render(m.sidebar()),
+		m.panel(focusMain).Width(mainWidth).Height(topHeight).Render(m.mainPanel()))
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, bottom, hints))
 	v.AltScreen = true
@@ -34,6 +36,13 @@ func (m Model) View() tea.View {
 // mainPanel renders the content for the active section
 func (m Model) mainPanel() string {
 	return titleStyle.Render(m.active.String()) + "\n\n" + dimStyle.Render("Nothing yet")
+}
+
+func (m Model) panel(f focus) lipgloss.Style {
+	if m.focus == f {
+		return panelStyle.BorderForeground(colorPurple)
+	}
+	return panelStyle
 }
 
 // nowPlaying renders the content of the bottom panel

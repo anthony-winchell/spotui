@@ -15,7 +15,7 @@ const (
 	sectionCount // number of sections; must stay last
 )
 
-// String returns the label shown in the taskbar
+// String returns the label shown in the sidebar
 func (s section) String() string {
 	switch s {
 	case sectionNowPlaying:

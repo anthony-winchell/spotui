@@ -37,11 +37,19 @@ const (
 	seekTolerance = 1500 * time.Millisecond
 )
 
+type focus int
+
+const (
+	focusSidebar focus = iota
+	focusMain
+)
+
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
 
 	active section // highlighted sidebar entry
+	focus  focus   // panel that receives j/k
 
 	playback spotify.PlaybackState
 	loading  bool
