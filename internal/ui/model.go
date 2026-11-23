@@ -48,8 +48,9 @@ const (
 type Model struct {
 	client *spotify.Client
 
-	active section // highlighted sidebar entry
-	focus  focus   // panel that receives j/k
+	active    section // highlighted sidebar entry
+	focus     focus   // panel that receives j/k
+	playlists listData[spotify.Playlist]
 
 	playback spotify.PlaybackState
 	loading  bool
@@ -107,6 +108,12 @@ type seekFlushMsg struct {
 // tickMsg is sent once per second to redraw progress and drive sync
 type tickMsg time.Time
 
+// playlistsMsg carries the user's playlists, or the error that stopped the fetch
+type playlistsMsg struct {
+	items []spotify.Playlist
+	err   error
+}
+
 // --- Commands ------------------------------------------------
 
 // tick schedules the next tickMsg
@@ -157,5 +164,30 @@ func runCommand(fn func(context.Context) error) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
 		return commandDoneMsg{err: fn(ctx)}
+	}
+}
+
+// fetchPlaylists loads every page of the user's playlists
+func fetchPlaylists(c *spotify.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+
+		var all []spotify.Playlist
+		offset := 0
+
+		for {
+			page, err := c.Playlists(ctx, offset)
+			if err != nil {
+				return playlistsMsg{err: err}
+			}
+
+			all = append(all, page.Items...)
+			if !page.HasNext || len(page.Items) == 0 {
+				return playlistsMsg{items: all}
+			}
+
+			offset += len(page.Items)
+		}
 	}
 }

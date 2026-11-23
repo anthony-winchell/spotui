@@ -41,11 +41,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "j":
 			if m.focus == focusSidebar {
 				m.active = min(m.active+1, sectionCount-1)
+				return m.ensureLoaded()
 			}
+			m.moveCursor(1)
 		case "k":
 			if m.focus == focusSidebar {
 				m.active = max(m.active-1, 0)
+				return m.ensureLoaded()
 			}
+			m.moveCursor(-1)
 		}
 	case playbackMsg:
 		now := time.Now()
@@ -110,6 +114,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, runCommand(func(ctx context.Context) error {
 			return m.client.Seek(ctx, pos)
 		})
+
+	case playlistsMsg:
+		m.playlists.loading = false
+		m.playlists.err = msg.err
+		if msg.err == nil {
+			m.playlists.items = msg.items
+			m.playlists.loaded = true
+		}
 	}
 	return m, nil
 }
@@ -210,4 +222,24 @@ func syncDelay(err error) time.Duration {
 	}
 
 	return syncInterval
+}
+
+// ensureLoaded starts fetching the active section's data if it isn't loaded or loading
+func (m Model) ensureLoaded() (Model, tea.Cmd) {
+	switch m.active {
+	case sectionPlaylists:
+		if !m.playlists.loaded && !m.playlists.loading {
+			m.playlists.loading = true
+			return m, fetchPlaylists(m.client)
+		}
+	}
+	return m, nil
+}
+
+// moveCursor moves the cursor of the active section's list
+func (m *Model) moveCursor(delta int) {
+	switch m.active {
+	case sectionPlaylists:
+		m.playlists.move(delta)
+	}
 }

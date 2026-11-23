@@ -24,9 +24,15 @@ func (m Model) View() tea.View {
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
 	mainWidth := max(0, m.width-sidebarWidth)
 
+	mainStyle := m.panel(focusMain).Width(mainWidth).Height(topHeight)
+	main := mainStyle.Render(m.mainPanel(
+		mainWidth-mainStyle.GetHorizontalFrameSize(),
+		topHeight-mainStyle.GetVerticalFrameSize(),
+	))
+
 	top := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.panel(focusSidebar).Width(sidebarWidth).Height(topHeight).Render(m.sidebar()),
-		m.panel(focusMain).Width(mainWidth).Height(topHeight).Render(m.mainPanel()))
+		main)
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, bottom, hints))
 	v.AltScreen = true
@@ -34,10 +40,24 @@ func (m Model) View() tea.View {
 }
 
 // mainPanel renders the content for the active section
-func (m Model) mainPanel() string {
-	return titleStyle.Render(m.active.String()) + "\n\n" + dimStyle.Render("Nothing yet")
+func (m Model) mainPanel(width, height int) string {
+	title := titleStyle.Render(m.active.String())
+	bodyHeight := height - 2 // title + blank line
+
+	var body string
+	switch m.active {
+	case sectionPlaylists:
+		body = renderList(m.playlists, width, bodyHeight, func(p spotify.Playlist) string {
+			return p.Name
+		})
+	default:
+		body = dimStyle.Render("Nothing yet")
+	}
+
+	return title + "\n\n" + body
 }
 
+// panel returns the panel style, highlighted if f has focus
 func (m Model) panel(f focus) lipgloss.Style {
 	if m.focus == f {
 		return panelStyle.BorderForeground(colorPurple)
