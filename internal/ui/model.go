@@ -108,10 +108,11 @@ type seekFlushMsg struct {
 // tickMsg is sent once per second to redraw progress and drive sync
 type tickMsg time.Time
 
-// playlistsMsg carries the user's playlists, or the error that stopped the fetch
-type playlistsMsg struct {
-	items []spotify.Playlist
-	err   error
+// listMsg carries one page of items for a list
+type listMsg[T any] struct {
+	items   []T
+	hasMore bool // Spotify has another page after this one
+	err     error
 }
 
 // --- Commands ------------------------------------------------
@@ -167,27 +168,13 @@ func runCommand(fn func(context.Context) error) tea.Cmd {
 	}
 }
 
-// fetchPlaylists loads every page of the user's playlists
-func fetchPlaylists(c *spotify.Client) tea.Cmd {
+// fetchPage requests one page of a list starting at offset
+func fetchPage[T any](fetch func(context.Context, int) (spotify.Page[T], error), offset int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
 
-		var all []spotify.Playlist
-		offset := 0
-
-		for {
-			page, err := c.Playlists(ctx, offset)
-			if err != nil {
-				return playlistsMsg{err: err}
-			}
-
-			all = append(all, page.Items...)
-			if !page.HasNext || len(page.Items) == 0 {
-				return playlistsMsg{items: all}
-			}
-
-			offset += len(page.Items)
-		}
+		page, err := fetch(ctx, offset)
+		return listMsg[T]{items: page.Items, hasMore: page.HasNext, err: err}
 	}
 }

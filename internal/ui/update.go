@@ -36,20 +36,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.seek(seekStep)
 		case "h", "esc":
 			m.focus = focusSidebar
-		case "l", "enter":
+		case "l":
 			m.focus = focusMain
+		case "enter":
+			if m.focus == focusSidebar {
+				m.focus = focusMain
+				return m, nil
+			}
+			return m, m.playSelected()
 		case "j":
 			if m.focus == focusSidebar {
 				m.active = min(m.active+1, sectionCount-1)
-				return m.ensureLoaded()
+			} else {
+				m.moveCursor(1)
 			}
-			m.moveCursor(1)
+			cmd := m.fetchActive()
+			return m, cmd
 		case "k":
 			if m.focus == focusSidebar {
 				m.active = max(m.active-1, 0)
-				return m.ensureLoaded()
+			} else {
+				m.moveCursor(-1)
 			}
-			m.moveCursor(-1)
+			cmd := m.fetchActive()
+			return m, cmd
 		}
 	case playbackMsg:
 		now := time.Now()
@@ -115,13 +125,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.client.Seek(ctx, pos)
 		})
 
-	case playlistsMsg:
-		m.playlists.loading = false
-		m.playlists.err = msg.err
-		if msg.err == nil {
-			m.playlists.items = msg.items
-			m.playlists.loaded = true
-		}
+	case listMsg[spotify.Playlist]:
+		m.playlists.apply(msg)
 	}
 	return m, nil
 }
@@ -224,16 +229,13 @@ func syncDelay(err error) time.Duration {
 	return syncInterval
 }
 
-// ensureLoaded starts fetching the active section's data if it isn't loaded or loading
-func (m Model) ensureLoaded() (Model, tea.Cmd) {
+// fetchActive starts fetching the active section's next page, if it needs one
+func (m *Model) fetchActive() tea.Cmd {
 	switch m.active {
 	case sectionPlaylists:
-		if !m.playlists.loaded && !m.playlists.loading {
-			m.playlists.loading = true
-			return m, fetchPlaylists(m.client)
-		}
+		return m.playlists.next(m.client.Playlists)
 	}
-	return m, nil
+	return nil
 }
 
 // moveCursor moves the cursor of the active section's list
@@ -242,4 +244,19 @@ func (m *Model) moveCursor(delta int) {
 	case sectionPlaylists:
 		m.playlists.move(delta)
 	}
+}
+
+// playSelected returns a command that plays the highlighted item, or nil if there is none
+func (m Model) playSelected() tea.Cmd {
+	switch m.active {
+	case sectionPlaylists:
+		p, ok := m.playlists.selected()
+		if !ok {
+			return nil
+		}
+		return runCommand(func(ctx context.Context) error {
+			return m.client.PlayContext(ctx, p.URI, 0)
+		})
+	}
+	return nil
 }

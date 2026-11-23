@@ -18,7 +18,7 @@ const sidebarWidth = 22
 // View renders the model
 func (m Model) View() tea.View {
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
-	hints := dimStyle.Render("h/l panels • j/k move • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit")
+	hints := dimStyle.Render("h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit")
 
 	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
