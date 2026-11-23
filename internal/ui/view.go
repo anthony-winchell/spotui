@@ -12,15 +12,28 @@ import (
 	"github.com/anthony-winchell/spotui/internal/spotify"
 )
 
+// sidebarWidth is the sidebar's total width, including border and padding
+const sidebarWidth = 22
+
 // View renders the model
 func (m Model) View() tea.View {
-	body := m.nowPlaying()
+	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
+	hints := dimStyle.Render("j/k move • space play/pause • n next • N prev • h/l seek • +/- vol • q quit")
 
-	hints := dimStyle.Render("space play/pause • n next • N prev • h/l seek • +/- vol • q quit")
+	// Whatever height is left ver after the bottom rows goes to the top row
+	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
+	mainWidth := max(0, m.width-sidebarWidth)
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, panelStyle.Width(m.width).Render(body), hints))
+	top := lipgloss.JoinHorizontal(lipgloss.Top, panelStyle.Width(sidebarWidth).Height(topHeight).Render(m.sidebar()), panelStyle.Width(mainWidth).Height(topHeight).Render(m.mainPanel()))
+
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, bottom, hints))
 	v.AltScreen = true
 	return v
+}
+
+// mainPanel renders the content for the active section
+func (m Model) mainPanel() string {
+	return titleStyle.Render(m.active.String()) + "\n\n" + dimStyle.Render("Nothing yet")
 }
 
 // nowPlaying renders the content of the bottom panel

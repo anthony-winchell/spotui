@@ -34,6 +34,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.seek(-seekStep)
 		case "l":
 			return m.seek(seekStep)
+		case "j":
+			m.active = min(m.active+1, sectionCount-1)
+		case "k":
+			m.active = max(m.active-1, 0)
 		}
 	case playbackMsg:
 		now := time.Now()

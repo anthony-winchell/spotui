@@ -25,10 +25,12 @@ var (
 	dimStyle    = lipgloss.NewStyle().Foreground(colorComment)
 	errorStyle  = lipgloss.NewStyle().Foreground(colorPink)
 	barStyle    = lipgloss.NewStyle().Foreground(colorPurple)
+
+	selectedStyle = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
 )
 
 // progressBar draws a bar `width` cells wide,
-// filled in proportioin to pos/total
+// filled in proportion to pos/total
 func progressBar(pos, total time.Duration, width int) string {
 	if width <= 0 {
 		return ""

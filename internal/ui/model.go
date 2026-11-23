@@ -41,6 +41,8 @@ const (
 type Model struct {
 	client *spotify.Client
 
+	active section // highlighted sidebar entry
+
 	playback spotify.PlaybackState
 	loading  bool
 	err      error
