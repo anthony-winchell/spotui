@@ -15,10 +15,22 @@ import (
 // sidebarWidth is the sidebar's total width, including border and padding
 const sidebarWidth = 22
 
+// searchWidth is how many cells of the query fit in the main panel
+func (m Model) searchWidth() int {
+	inner := m.width - sidebarWidth - panelStyle.GetHorizontalFrameSize()
+	return max(1, inner-lipgloss.Width(m.search.Prompt)-1)
+}
+
 // View renders the model
 func (m Model) View() tea.View {
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
-	hints := dimStyle.Render("h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit")
+	hintText := "/ search • h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit"
+
+	if m.search.Focused() {
+		hintText = "enter search • esc cancel • ctrl+c quit"
+	}
+
+	hints := dimStyle.Render(hintText)
 
 	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
@@ -56,6 +68,16 @@ func (m Model) mainPanel(width, height int) string {
 		body = renderList(m.recent, width, bodyHeight, func(p spotify.Play) string {
 			return p.PlayedAt.Local().Format("Mon 15:04") + " " + trackLabel(p.Track)
 		})
+	case sectionSearch:
+		body = m.search.View() + "\n\n"
+		if m.searchQuery == "" {
+			body += dimStyle.Render("Press / to input. Enter to search")
+		} else {
+			body += renderList(m.results, width, bodyHeight-2, func(r searchResult) string {
+				return fmt.Sprintf("%-6s %s", r.kind, r.label)
+			})
+		}
+
 	default:
 		body = dimStyle.Render("Nothing yet")
 	}

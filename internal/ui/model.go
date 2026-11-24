@@ -5,7 +5,9 @@ import (
 	"context"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/anthony-winchell/spotui/internal/spotify"
 )
@@ -58,6 +60,10 @@ type Model struct {
 	liked     listData[spotify.Track]
 	recent    listData[spotify.Play]
 
+	search      textinput.Model // search box; focused means it captures all keys
+	searchQuery string          // last submitted query
+	results     listData[searchResult]
+
 	playback spotify.PlaybackState
 	loading  bool
 	err      error
@@ -74,7 +80,17 @@ type Model struct {
 
 // New returns the initial Model
 func New(client *spotify.Client) Model {
-	return Model{client: client, loading: true, fetching: true} // Init starts a fetch
+	in := textinput.New()
+	in.Prompt = "/ "
+	in.Placeholder = "tracks, artists, albums"
+
+	s := textinput.DefaultDarkStyles()
+	s.Focused.Prompt = lipgloss.NewStyle().Foreground(colorPurple)
+	s.Focused.Placeholder = dimStyle
+	s.Blurred.Placeholder = dimStyle
+	in.SetStyles(s)
+
+	return Model{client: client, loading: true, fetching: true, search: in} // Init starts a fetch
 }
 
 // Init runs once at startup; its command loads the initial state

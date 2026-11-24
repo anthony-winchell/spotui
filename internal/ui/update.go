@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -15,8 +16,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.search.SetWidth(m.searchWidth())
 
 	case tea.KeyPressMsg:
+		if m.search.Focused() {
+			return m.updateSearchInput(msg)
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -36,12 +41,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.seek(seekStep)
 		case "h", "esc":
 			m.focus = focusSidebar
+		case "/":
+			return m.startSearch()
 		case "l":
-			m.focus = focusMain
+			return m.enterMain()
 		case "enter":
 			if m.focus == focusSidebar {
-				m.focus = focusMain
-				return m, nil
+				return m.enterMain()
 			}
 			return m, m.playSelected()
 		case "j":
@@ -133,6 +139,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case listMsg[spotify.Play]:
 		m.recent.apply(msg)
+
+	case searchMsg:
+		if msg.query != m.searchQuery || !m.results.loading {
+			return m, nil // stale: an older query, or a duplicate of one already applied
+		}
+		m.results.apply(listMsg[searchResult]{items: msg.results, err: msg.err})
+	default:
+		var cmd tea.Cmd
+		m.search, cmd = m.search.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -257,6 +273,8 @@ func (m *Model) moveCursor(delta int) {
 		m.liked.move(delta)
 	case sectionRecent:
 		m.recent.move(delta)
+	case sectionSearch:
+		m.results.move(delta)
 	}
 }
 
@@ -287,6 +305,12 @@ func (m Model) playSelected() tea.Cmd {
 		return runCommand(func(ctx context.Context) error {
 			return m.client.PlayTracks(ctx, []string{p.Track.URI}, 0)
 		})
+	case sectionSearch:
+		r, ok := m.results.selected()
+		if !ok {
+			return nil
+		}
+		return r.play(m.client)
 	}
 	return nil
 }
@@ -299,4 +323,47 @@ func trackURIs(tracks []spotify.Track, n int) []string {
 		uris[i] = t.URI
 	}
 	return uris
+}
+
+// startSearch jumps to the Search section and focuses the search box
+func (m Model) startSearch() (Model, tea.Cmd) {
+	m.active = sectionSearch
+	m.focus = focusMain
+	cmd := m.search.Focus()
+	return m, cmd
+}
+
+// enterMain moves focus to the main panel; on Search it also opens the search box
+func (m Model) enterMain() (Model, tea.Cmd) {
+	if m.active == sectionSearch {
+		return m.startSearch()
+	}
+
+	m.focus = focusMain
+	return m, nil
+}
+
+// updateSearchInput handles keys while the search box has focus
+func (m Model) updateSearchInput(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.search.Blur()
+		return m, nil
+	case "enter":
+		m.search.Blur()
+		q := strings.TrimSpace(m.search.Value())
+		if q == "" {
+			return m, nil
+		}
+		m.searchQuery = q
+		m.results = listData[searchResult]{loading: true} // clear old results
+
+		return m, searchCmd(m.client, q)
+	}
+
+	var cmd tea.Cmd
+	m.search, cmd = m.search.Update(msg)
+	return m, cmd
 }

@@ -115,9 +115,12 @@ func (c *Client) Play(ctx context.Context) error {
 
 // PlayContext starts playing a playlist, album or artist from the track position
 func (c *Client) PlayContext(ctx context.Context, contextURI string, position int) error {
-	body := playBody{
-		ContextURI: contextURI,
-		Offset:     &playOffset{Position: position},
+	body := playBody{ContextURI: contextURI}
+
+	// Spotify only accepts an offset for albums and playlists; leave it out
+	// when starting from the top so artist contexts work too
+	if position > 0 {
+		body.Offset = &playOffset{Position: position}
 	}
 
 	return c.playerCommand(ctx, http.MethodPut, "/me/player/play", nil, body)
