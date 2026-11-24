@@ -58,6 +58,8 @@ func (m Model) mainPanel(width, height int) string {
 
 	var body string
 	switch m.active {
+	case sectionNowPlaying:
+		body = m.nowPlayingView(width, bodyHeight)
 	case sectionPlaylists:
 		body = renderList(m.playlists, width, bodyHeight, func(p spotify.Playlist) string {
 			return p.Name
@@ -100,16 +102,10 @@ func (m Model) panel(f focus) lipgloss.Style {
 
 // nowPlaying renders the content of the bottom panel
 func (m Model) nowPlaying() string {
-	switch {
-	case m.loading:
-		return dimStyle.Render("Loading...")
-	case errors.Is(m.err, spotify.ErrNoActiveDevice):
-		return dimStyle.Render("No active device. Open Spotify and start playing something.")
-	case m.err != nil:
-		return errorStyle.Render("Error: " + m.err.Error())
-	case m.playback.Track == nil:
-		return dimStyle.Render("Nothing playing.")
+	if n := m.playbackNotice(); n != "" {
+		return n
 	}
+
 	t := m.playback.Track
 	icon := "⏸"
 	if m.playback.Playing {
@@ -137,6 +133,83 @@ func (m Model) nowPlaying() string {
 	lines = append(lines, strings.Join(parts, dimStyle.Render(" • ")))
 
 	return strings.Join(lines, "\n")
+}
+
+const (
+	maxArtHeight    = 12 // tallest the artwork square gets, in rows
+	minArtHeight    = 6  // below this, skip the artwork
+	minDetailsWidth = 30 // narrowest the details column can be beside the artwork
+)
+
+// nowPlayingView renders the Now Playing section: artwork beside track details
+func (m Model) nowPlayingView(width, height int) string {
+	if n := m.playbackNotice(); n != "" {
+		return n
+	}
+
+	artHeight := min(height, maxArtHeight)
+	artWidth := artHeight * 2 // terminal cells are about twice as tall as wide
+	gap := 2
+
+	if artHeight < minArtHeight || width-artWidth-gap < minDetailsWidth {
+		return lipgloss.NewStyle().MaxHeight(height).Render(m.trackDetails(width)) // no room: text only
+	}
+
+	view := lipgloss.JoinHorizontal(lipgloss.Top, artPlaceholder(artWidth, artHeight), strings.Repeat(" ", gap), m.trackDetails(width-artWidth-gap))
+	return lipgloss.NewStyle().MaxHeight(height).Render(view)
+}
+
+// artPlaceholder draws an empty frame where album artwork will go
+func artPlaceholder(width, height int) string {
+	return lipgloss.NewStyle().Width(width).Height(height).Border(lipgloss.RoundedBorder()).BorderForeground(colorComment).Foreground(colorComment).Align(lipgloss.Center, lipgloss.Center).Render("♪")
+}
+
+// trackDetails renders the current track's details, at most width cells wide
+func (m Model) trackDetails(width int) string {
+	p := m.playback
+	t := p.Track
+
+	pos := p.ProgressAt(time.Now())
+	times := fmt.Sprintf(" %s / %s", mmss(pos), mmss(t.Duration))
+
+	state := dimStyle.Render("⏸ Paused")
+	if p.Playing {
+		state = onStyle.Render("▶ Playing")
+	}
+
+	device := dimStyle.Render(fmt.Sprintf("on %s (%s)", p.Device.Name, p.Device.Type))
+	if p.Device.SupportsVolume {
+		device += dimStyle.Render(fmt.Sprintf(" • vol %d%%", p.Device.Volume))
+	}
+
+	lines := []string{
+		titleStyle.Render(t.Name),
+		artistStyle.Render(strings.Join(t.Artists, ", ")),
+		dimStyle.Render(t.Album),
+		"",
+		progressBar(pos, t.Duration, width-lipgloss.Width(times)) + times,
+		"",
+		state,
+		device,
+		modeLabel("shuffle", p.Shuffle) + dimStyle.Render(" • ") + repeatLabel(p.Repeat),
+	}
+	return lipgloss.NewStyle().MaxWidth(width).Render(strings.Join(lines, "\n"))
+}
+
+// playbackNotice returns a message to show instead of track details, or "" when there is a track to show
+func (m Model) playbackNotice() string {
+	switch {
+	case m.loading:
+		return dimStyle.Render("Loading...")
+	case errors.Is(m.err, spotify.ErrNoActiveDevice):
+		return dimStyle.Render("No active device. Open Spotify and start playing something.")
+	case m.err != nil:
+		return errorStyle.Render("Error: " + m.err.Error())
+	case m.playback.Track == nil:
+		return dimStyle.Render("Nothing playing")
+	}
+
+	return ""
 }
 
 // modeLabel renders a playback mode, highlighted when on
