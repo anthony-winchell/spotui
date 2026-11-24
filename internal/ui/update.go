@@ -127,6 +127,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case listMsg[spotify.Playlist]:
 		m.playlists.apply(msg)
+
+	case listMsg[spotify.Track]:
+		m.liked.apply(msg) // the only track list until search arrives
+
+	case listMsg[spotify.Play]:
+		m.recent.apply(msg)
 	}
 	return m, nil
 }
@@ -234,6 +240,10 @@ func (m *Model) fetchActive() tea.Cmd {
 	switch m.active {
 	case sectionPlaylists:
 		return m.playlists.next(m.client.Playlists)
+	case sectionLiked:
+		return m.liked.next(m.client.LikedSongs)
+	case sectionRecent:
+		return m.recent.next(recentPage(m.client))
 	}
 	return nil
 }
@@ -243,6 +253,10 @@ func (m *Model) moveCursor(delta int) {
 	switch m.active {
 	case sectionPlaylists:
 		m.playlists.move(delta)
+	case sectionLiked:
+		m.liked.move(delta)
+	case sectionRecent:
+		m.recent.move(delta)
 	}
 }
 
@@ -257,6 +271,32 @@ func (m Model) playSelected() tea.Cmd {
 		return runCommand(func(ctx context.Context) error {
 			return m.client.PlayContext(ctx, p.URI, 0)
 		})
+	case sectionLiked:
+		if len(m.liked.items) == 0 {
+			return nil
+		}
+		uris := trackURIs(m.liked.items[m.liked.cursor:], playQueueSize)
+		return runCommand(func(ctx context.Context) error {
+			return m.client.PlayTracks(ctx, uris, 0)
+		})
+	case sectionRecent:
+		p, ok := m.recent.selected()
+		if !ok {
+			return nil
+		}
+		return runCommand(func(ctx context.Context) error {
+			return m.client.PlayTracks(ctx, []string{p.Track.URI}, 0)
+		})
 	}
 	return nil
+}
+
+// trackURIs returns the URIs of the first n tracks
+func trackURIs(tracks []spotify.Track, n int) []string {
+	tracks = tracks[:min(n, len(tracks))]
+	uris := make([]string, len(tracks))
+	for i, t := range tracks {
+		uris[i] = t.URI
+	}
+	return uris
 }

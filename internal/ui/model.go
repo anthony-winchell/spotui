@@ -35,6 +35,9 @@ const (
 
 	// seekTolerance is how close a fetched position must be to ours to count as confirmed
 	seekTolerance = 1500 * time.Millisecond
+
+	// playQueueSize is how many liked songs are sent when starting playback from one
+	playQueueSize = 50
 )
 
 type focus int
@@ -48,9 +51,12 @@ const (
 type Model struct {
 	client *spotify.Client
 
-	active    section // highlighted sidebar entry
-	focus     focus   // panel that receives j/k
+	active section // highlighted sidebar entry
+	focus  focus   // panel that receives j/k
+
 	playlists listData[spotify.Playlist]
+	liked     listData[spotify.Track]
+	recent    listData[spotify.Play]
 
 	playback spotify.PlaybackState
 	loading  bool
@@ -176,5 +182,14 @@ func fetchPage[T any](fetch func(context.Context, int) (spotify.Page[T], error),
 
 		page, err := fetch(ctx, offset)
 		return listMsg[T]{items: page.Items, hasMore: page.HasNext, err: err}
+	}
+}
+
+// recentPage adapts RecentlyPlayed to the shape fetchPage expects.
+// Spotify keeps only the last 50 plays, so there is never a next page.
+func recentPage(c *spotify.Client) func(context.Context, int) (spotify.Page[spotify.Play], error) {
+	return func(ctx context.Context, _ int) (spotify.Page[spotify.Play], error) {
+		plays, err := c.RecentlyPlayed(ctx)
+		return spotify.Page[spotify.Play]{Items: plays}, err
 	}
 }

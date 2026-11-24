@@ -50,11 +50,22 @@ func (m Model) mainPanel(width, height int) string {
 		body = renderList(m.playlists, width, bodyHeight, func(p spotify.Playlist) string {
 			return p.Name
 		})
+	case sectionLiked:
+		body = renderList(m.liked, width, bodyHeight, trackLabel)
+	case sectionRecent:
+		body = renderList(m.recent, width, bodyHeight, func(p spotify.Play) string {
+			return p.PlayedAt.Local().Format("Mon 15:04") + " " + trackLabel(p.Track)
+		})
 	default:
 		body = dimStyle.Render("Nothing yet")
 	}
 
 	return title + "\n\n" + body
+}
+
+// trackLabel formats a track as "Name — Artist, Artist"
+func trackLabel(t spotify.Track) string {
+	return t.Name + " — " + strings.Join(t.Artists, ", ")
 }
 
 // panel returns the panel style, highlighted if f has focus
