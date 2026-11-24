@@ -24,7 +24,7 @@ func (m Model) searchWidth() int {
 // View renders the model
 func (m Model) View() tea.View {
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
-	hintText := "/ search • h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • q quit"
+	hintText := "/ search • h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • s shuffle • r repeat • q quit"
 
 	if m.search.Focused() {
 		hintText = "enter search • esc cancel • ctrl+c quit"
@@ -127,11 +127,36 @@ func (m Model) nowPlaying() string {
 		bar + times,
 	}
 
-	if d := m.playback.Device; d.SupportsVolume {
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("%s • vol %d%%", d.Name, d.Volume)))
+	d := m.playback.Device
+	parts := []string{dimStyle.Render(d.Name)}
+	if d.SupportsVolume {
+		parts = append(parts, dimStyle.Render(fmt.Sprintf("vol %d%%", d.Volume)))
 	}
 
+	parts = append(parts, modeLabel("shuffle", m.playback.Shuffle), repeatLabel(m.playback.Repeat))
+	lines = append(lines, strings.Join(parts, dimStyle.Render(" • ")))
+
 	return strings.Join(lines, "\n")
+}
+
+// modeLabel renders a playback mode, highlighted when on
+func modeLabel(name string, on bool) string {
+	if on {
+		return onStyle.Render(name)
+	}
+	return dimStyle.Render(name)
+}
+
+// repeatLabel renders the repeat mode
+func repeatLabel(r spotify.RepeatMode) string {
+	switch r {
+	case spotify.RepeatTrack:
+		return modeLabel("repeat one", true)
+	case spotify.RepeatContext:
+		return modeLabel("repeat", true)
+	default:
+		return modeLabel("repeat", false)
+	}
 }
 
 // mmss formats d as m:ss

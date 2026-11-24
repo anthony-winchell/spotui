@@ -39,6 +39,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.seek(-seekStep)
 		case ".":
 			return m.seek(seekStep)
+		case "s":
+			return m.toggleShuffle()
+		case "r":
+			return m.cycleRepeat()
 		case "h", "esc":
 			m.focus = focusSidebar
 		case "/":
@@ -131,6 +135,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.client.Seek(ctx, pos)
 		})
 
+	case shuffleFlushMsg:
+		if msg.seq != m.shufflePending.seq {
+			return m, nil // a newer key press superseded this one
+		}
+		on := m.playback.Shuffle
+		return m, runCommand(func(ctx context.Context) error {
+			return m.client.SetShuffle(ctx, on)
+		})
+	case repeatFlushMsg:
+		if msg.seq != m.repeatPending.seq {
+			return m, nil // a newer key press superseded this one
+		}
+		mode := m.playback.Repeat
+		return m, runCommand(func(ctx context.Context) error {
+			return m.client.SetRepeat(ctx, mode)
+		})
+
 	case listMsg[spotify.Playlist]:
 		m.playlists.apply(msg)
 
@@ -166,6 +187,44 @@ func (m Model) changeVolume(delta int) (Model, tea.Cmd) {
 	})
 }
 
+// toggleShuffle flips shuffle locally and schedules a debounced send
+func (m Model) toggleShuffle() (Model, tea.Cmd) {
+	if m.playback.Device.ID == "" {
+		return m, nil // no device to send to
+	}
+
+	m.playback.Shuffle = !m.playback.Shuffle
+	seq := m.shufflePending.start(keyDebounce + confirmTimeout)
+	return m, tea.Tick(keyDebounce, func(time.Time) tea.Msg {
+		return shuffleFlushMsg{seq: seq}
+	})
+}
+
+// cycleRepeat advances repeat locally and schedules a debounced send
+func (m Model) cycleRepeat() (Model, tea.Cmd) {
+	if m.playback.Device.ID == "" {
+		return m, nil // no device to send to
+	}
+
+	m.playback.Repeat = nextRepeat(m.playback.Repeat)
+	seq := m.repeatPending.start(keyDebounce + confirmTimeout)
+	return m, tea.Tick(keyDebounce, func(time.Time) tea.Msg {
+		return repeatFlushMsg{seq: seq}
+	})
+}
+
+// nextRepeat cycles off -> context -> track -> off
+func nextRepeat(mode spotify.RepeatMode) spotify.RepeatMode {
+	switch mode {
+	case spotify.RepeatContext:
+		return spotify.RepeatTrack
+	case spotify.RepeatTrack:
+		return spotify.RepeatOff
+	default:
+		return spotify.RepeatContext
+	}
+}
+
 // seek moves the position locally by delta and schedules a debounced send
 func (m Model) seek(delta time.Duration) (Model, tea.Cmd) {
 	t := m.playback.Track
@@ -189,6 +248,22 @@ func (m *Model) reconcile(prev spotify.PlaybackState, now time.Time) {
 	m.reconcilePlay(prev, now)
 	m.reconcileVolume(prev, now)
 	m.reconcileSeek(prev, now)
+	reconcileValue(&m.shufflePending, now, prev.Shuffle, &m.playback.Shuffle)
+	reconcileValue(&m.repeatPending, now, prev.Repeat, &m.playback.Repeat)
+}
+
+// reconcileValue keeps our pending value until Spotify reports the same one
+func reconcileValue[T comparable](p *pending, now time.Time, ours T, theirs *T) {
+	if !p.active(now) {
+		return
+	}
+
+	if *theirs == ours {
+		p.confirm() // Spotify caught up
+		return
+	}
+
+	*theirs = ours // not yet; keep ours
 }
 
 func (m *Model) reconcileVolume(prev spotify.PlaybackState, now time.Time) {

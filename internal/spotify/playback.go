@@ -26,10 +26,21 @@ type Device struct {
 	Restricted     bool // true if the device rejects the Web API commands
 }
 
+// RepeatMode is Spotify's repeat setting
+type RepeatMode string
+
+const (
+	RepeatOff     RepeatMode = "off"
+	RepeatContext RepeatMode = "context" // repeat the playlist or album
+	RepeatTrack   RepeatMode = "track"   // repeat the current track
+)
+
 // PlaybackState is a snapshot of the user's playback
 // nil if nothing playable is loaded (e.g. an ad or podcast)
 type PlaybackState struct {
 	Playing   bool
+	Shuffle   bool
+	Repeat    RepeatMode
 	Progress  time.Duration
 	FetchedAt time.Time // when Progress was measured
 	Track     *Track
@@ -46,9 +57,11 @@ type playbackResponse struct {
 		SupportsVolume bool   `json:"supports_volume"`
 		IsRestricted   bool   `json:"is_restricted"`
 	} `json:"device"`
-	IsPlaying  bool         `json:"is_playing"`
-	ProgressMS int          `json:"progress_ms"`
-	Item       *trackObject `json:"item"`
+	IsPlaying    bool         `json:"is_playing"`
+	ShuffleState bool         `json:"shuffle_state"`
+	RepeatState  string       `json:"repeat_state"`
+	ProgressMS   int          `json:"progress_ms"`
+	Item         *trackObject `json:"item"`
 }
 
 // Playback returns the current playback state, or ErrNoActiveDevice
@@ -168,9 +181,23 @@ func (c *Client) SetVolume(ctx context.Context, percent int) error {
 	return c.playerCommand(ctx, http.MethodPut, "/me/player/volume", q, nil)
 }
 
+// SetShuffle turns shuffle on or off
+func (c *Client) SetShuffle(ctx context.Context, on bool) error {
+	q := url.Values{"state": {strconv.FormatBool(on)}}
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/shuffle", q, nil)
+}
+
+// SetRepeat sets the repeat mode
+func (c *Client) SetRepeat(ctx context.Context, mode RepeatMode) error {
+	q := url.Values{"state": {string(mode)}}
+	return c.playerCommand(ctx, http.MethodPut, "/me/player/repeat", q, nil)
+}
+
 func (pr *playbackResponse) toState(fetchedAt time.Time) PlaybackState {
 	s := PlaybackState{
 		Playing:   pr.IsPlaying,
+		Shuffle:   pr.ShuffleState,
+		Repeat:    RepeatMode(pr.RepeatState),
 		Progress:  time.Duration(pr.ProgressMS) * time.Millisecond,
 		FetchedAt: fetchedAt,
 		Device: Device{

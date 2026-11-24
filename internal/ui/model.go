@@ -68,9 +68,11 @@ type Model struct {
 	loading  bool
 	err      error
 
-	volPending  pending // local volume change awaiting confirmation
-	seekPending pending // local seek awaiting confirmation
-	playPending pending // local play/pause awaiting confirmation
+	volPending     pending // local volume change awaiting confirmation
+	seekPending    pending // local seek awaiting confirmation
+	playPending    pending // local play/pause awaiting confirmation
+	shufflePending pending // local shuffle change awaiting confirmation
+	repeatPending  pending // local repeat change awaiting confirmation
 
 	fetching bool      // a playback fetch is in flight
 	nextSync time.Time // earliest time for the next periodic fetch
@@ -124,6 +126,16 @@ type volumeFlushMsg struct {
 
 // seekFlushMsg fires after a seek key press; only the latest one is acted on
 type seekFlushMsg struct {
+	seq int
+}
+
+// shuffleFlushMsg fires after a shuffle key press; only the latest one is acted on
+type shuffleFlushMsg struct {
+	seq int
+}
+
+// repeatFlushMsg fires after a repeat key press; only the latest one is acted on
+type repeatFlushMsg struct {
 	seq int
 }
 

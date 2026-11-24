@@ -27,6 +27,7 @@ var (
 	barStyle    = lipgloss.NewStyle().Foreground(colorPurple)
 
 	selectedStyle = lipgloss.NewStyle().Foreground(colorPurple).Bold(true)
+	onStyle       = lipgloss.NewStyle().Foreground(colorGreen)
 )
 
 // progressBar draws a bar `width` cells wide,
