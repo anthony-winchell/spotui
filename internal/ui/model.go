@@ -40,6 +40,9 @@ const (
 
 	// playQueueSize is how many liked songs are sent when starting playback from one
 	playQueueSize = 50
+
+	// artworkRetryDelay is how long to wait before retrying a failed artwork download
+	artworkRetryDelay = 30 * time.Second
 )
 
 type focus int
@@ -67,6 +70,8 @@ type Model struct {
 	playback spotify.PlaybackState
 	loading  bool
 	err      error
+
+	art artwork // artwork of the current track
 
 	volPending     pending // local volume change awaiting confirmation
 	seekPending    pending // local seek awaiting confirmation

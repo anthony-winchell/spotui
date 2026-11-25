@@ -82,9 +82,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prev := m.playback
 			m.playback = msg.state
 			m.reconcile(prev, now)
+			cmd := m.fetchArtwork(now)
+			return m, cmd
 		case errors.Is(msg.err, spotify.ErrNoActiveDevice):
 			m.playback = spotify.PlaybackState{} // Spotify says nothing is playing
 		}
+
+	case artworkMsg:
+		if msg.url != m.art.url {
+			return m, nil // stale: the track changed while this was downloading
+		}
+		m.art.loading = false
+		if msg.err != nil {
+			m.art.retryAt = time.Now().Add(artworkRetryDelay)
+			return m, nil // the placeholder stays up
+		}
+		m.art.img = msg.img
 
 	case toggledMsg:
 		if msg.err != nil {
