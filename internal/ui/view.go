@@ -155,8 +155,16 @@ func (m Model) nowPlayingView(width, height int) string {
 		return lipgloss.NewStyle().MaxHeight(height).Render(m.trackDetails(width)) // no room: text only
 	}
 
-	view := lipgloss.JoinHorizontal(lipgloss.Top, artPlaceholder(artWidth, artHeight), strings.Repeat(" ", gap), m.trackDetails(width-artWidth-gap))
+	view := lipgloss.JoinHorizontal(lipgloss.Top, m.artworkView(artWidth, artHeight), strings.Repeat(" ", gap), m.trackDetails(width-artWidth-gap))
 	return lipgloss.NewStyle().MaxHeight(height).Render(view)
+}
+
+// artworkView renders the current track's artwork, or a placeholder
+func (m Model) artworkView(width, height int) string {
+	if m.art.img == nil || m.art.url != m.playback.Track.ArtworkURL {
+		return artPlaceholder(width, height)
+	}
+	return renderArtwork(m.art.img, width, height)
 }
 
 // artPlaceholder draws an empty frame where album artwork will go
