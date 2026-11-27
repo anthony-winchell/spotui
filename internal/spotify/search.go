@@ -5,11 +5,21 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // searchPageSize is the most results per type that Spotify returns to
 // Development Mode apps (lowered from 50)
 const searchPageSize = 10
+
+// SearchType is a kind of search result
+type SearchType string
+
+const (
+	SearchTracks  SearchType = "track"
+	SearchArtists SearchType = "artist"
+	SearchAlbums  SearchType = "album"
+)
 
 // Artist is a Spotify artist
 type Artist struct {
@@ -83,10 +93,19 @@ type searchResponse struct {
 
 // Search finds tracks, artists and albums matching query, starting at offset.
 // The query may use Spotify's field filters, such as "artists:radiohead year:1997".
-func (c *Client) Search(ctx context.Context, query string, offset int) (SearchResults, error) {
+func (c *Client) Search(ctx context.Context, query string, offset int, types ...SearchType) (SearchResults, error) {
+	if len(types) == 0 {
+		types = []SearchType{SearchTracks, SearchArtists, SearchAlbums}
+	}
+
+	names := make([]string, len(types))
+	for i, t := range types {
+		names[i] = string(t)
+	}
+
 	q := url.Values{
 		"q":      {query},
-		"type":   {"track,artist,album"},
+		"type":   {strings.Join(names, ",")},
 		"limit":  {strconv.Itoa(searchPageSize)},
 		"offset": {strconv.Itoa(offset)},
 	}

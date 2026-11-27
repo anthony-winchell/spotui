@@ -85,7 +85,8 @@ func (m Model) mainPanel(width, height int) string {
 		if m.searchQuery == "" {
 			body += dimStyle.Render("Press / to input. Enter to search")
 		} else {
-			body += renderList(m.results, width, bodyHeight-2, func(r searchResult) string {
+			body += m.searchTabs() + "\n"
+			body += renderList(m.results, width, bodyHeight-3, func(r searchResult) string {
 				return fmt.Sprintf("%-6s %s", r.kind, r.label)
 			})
 		}
@@ -192,6 +193,9 @@ func (m Model) hints() string {
 		keys = []string{"j/k sections", "l open", "/ search"}
 	default:
 		keys = []string{"j/k move", "enter play", "n/N next/prev", "/ search"}
+		if m.active == sectionSearch && m.searchQuery != "" {
+			keys = append(keys, "tab type")
+		}
 	}
 
 	if !m.search.Focused() {
@@ -211,6 +215,19 @@ func (m Model) hints() string {
 		line = next
 	}
 	return line
+}
+
+// searchTabs renders the result kinds, highlighting the selected one
+func (m Model) searchTabs() string {
+	tabs := make([]string, kindCount)
+	for k := range kindCount {
+		if k == m.searchKind {
+			tabs[k] = selectedStyle.Render(k.String())
+		} else {
+			tabs[k] = dimStyle.Render(k.String())
+		}
+	}
+	return strings.Join(tabs, "  ")
 }
 
 // statusLine returns the bottom line: a recent command error, then an

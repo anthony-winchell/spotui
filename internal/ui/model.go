@@ -64,6 +64,7 @@ type Model struct {
 
 	search      textinput.Model // search box; focused means it captures all keys
 	searchQuery string          // last submitted query
+	searchKind  searchKind      // which result types are shown
 	results     listData[searchResult]
 
 	playback spotify.PlaybackState

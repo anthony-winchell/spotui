@@ -49,6 +49,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.cycleRepeat()
 		case "f":
 			return m.toggleLike()
+		case "tab":
+			if m.active == sectionSearch && m.searchQuery != "" {
+				return m.setSearchKind(m.searchKind.next())
+			}
 		case "h", "esc":
 			m.focus = focusSidebar
 		case "/":
@@ -209,10 +213,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recent.apply(msg)
 
 	case searchMsg:
-		if msg.query != m.searchQuery || !m.results.loading {
+		if msg.query != m.searchQuery || msg.kind != m.searchKind || !m.results.loading {
 			return m, nil // stale: an older query, or a duplicate of one already applied
 		}
-		m.results.apply(listMsg[searchResult]{items: msg.results, err: msg.err})
+		m.results.apply(listMsg[searchResult]{items: msg.results, hasMore: msg.hasMore, err: msg.err})
 	default:
 		var cmd tea.Cmd
 		m.search, cmd = m.search.Update(msg)
@@ -396,6 +400,12 @@ func (m *Model) fetchActive() tea.Cmd {
 		return m.liked.next(m.client.LikedSongs)
 	case sectionRecent:
 		return m.recent.next(recentPage(m.client))
+	case sectionSearch:
+		if m.searchQuery == "" || !m.results.needsFetch() {
+			return nil
+		}
+		m.results.loading = true
+		return searchCmd(m.client, m.searchQuery, m.searchKind, len(m.results.items))
 	}
 	return nil
 }
@@ -460,6 +470,13 @@ func (m Model) startSearch() (Model, tea.Cmd) {
 	return m, cmd
 }
 
+// setSearchKind switches the result type and searches again from the first page
+func (m Model) setSearchKind(k searchKind) (Model, tea.Cmd) {
+	m.searchKind = k
+	m.results = listData[searchResult]{loading: true}
+	return m, searchCmd(m.client, m.searchQuery, k, 0)
+}
+
 // enterMain moves focus to the main panel; on Search it also opens the search box
 func (m Model) enterMain() (Model, tea.Cmd) {
 	if m.active == sectionSearch {
@@ -487,7 +504,7 @@ func (m Model) updateSearchInput(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.searchQuery = q
 		m.results = listData[searchResult]{loading: true} // clear old results
 
-		return m, searchCmd(m.client, q)
+		return m, searchCmd(m.client, q, m.searchKind, 0)
 	}
 
 	var cmd tea.Cmd

@@ -16,25 +16,65 @@ type searchResult struct {
 	uri   string
 }
 
-// searchMsg carries the result for one query
+// searchKind is which result the search shows
+type searchKind int
+
+const (
+	kindAll searchKind = iota // the first page of every type, no paging
+	kindTracks
+	kindArtists
+	kindAlbums
+	kindCount
+)
+
+var kindNames = [kindCount]string{"All", "Tracks", "Artists", "Albums"}
+
+func (k searchKind) String() string {
+	return kindNames[k]
+}
+
+// next returns the kind after k, wrapping around
+func (k searchKind) next() searchKind {
+	return (k + 1) % kindCount
+}
+
+// types returns the Spotify types to search for; nil means all of them
+func (k searchKind) types() []spotify.SearchType {
+	switch k {
+	case kindTracks:
+		return []spotify.SearchType{spotify.SearchTracks}
+	case kindArtists:
+		return []spotify.SearchType{spotify.SearchArtists}
+	case kindAlbums:
+		return []spotify.SearchType{spotify.SearchAlbums}
+	}
+	return nil
+}
+
+// searchMsg carries one page of results for a query and kind
 type searchMsg struct {
 	query   string // the query these results are for
+	kind    searchKind
 	results []searchResult
+	hasMore bool
 	err     error
 }
 
-// searchCmd runs a search and reports the flattened results
-func searchCmd(c *spotify.Client, query string) tea.Cmd {
+// searchCmd fetches one page of results, starting at offset
+func searchCmd(c *spotify.Client, query string, kind searchKind, offset int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
 
-		res, err := c.Search(ctx, query, 0)
+		res, err := c.Search(ctx, query, offset, kind.types()...)
 		if err != nil {
-			return searchMsg{query: query, err: err}
+			return searchMsg{query: query, kind: kind, err: err}
 		}
 
-		return searchMsg{query: query, results: flattenResults(res)}
+		// Only a single kind pages. Types we didn't ask for come back empty,
+		// so at most one kind of these can be true
+		hasMore := kind != kindAll && (res.Tracks.HasNext || res.Artists.HasNext || res.Albums.HasNext)
+		return searchMsg{query: query, kind: kind, results: flattenResults(res), hasMore: hasMore}
 	}
 }
 
