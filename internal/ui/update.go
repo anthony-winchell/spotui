@@ -22,6 +22,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.search.Focused() {
 			return m.updateSearchInput(msg)
 		}
+		if m.playback.Device.Restricted && m.playbackKey(msg.String()) {
+			m.status.set("This device can't be controlled from spotui")
+			return m, nil
+		}
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -238,6 +242,17 @@ func nextRepeat(mode spotify.RepeatMode) spotify.RepeatMode {
 	}
 }
 
+// playbackKey reports whether a key sends a playback control
+func (m Model) playbackKey(key string) bool {
+	switch key {
+	case "space", "n", "N", "-", "+", "=", ",", ".", "s", "r":
+		return true
+	case "enter":
+		return m.focus == focusMain // in the sidebar, enter only moves focus
+	}
+	return false
+}
+
 // seek moves the position locally by delta and schedules a debounced send
 func (m Model) seek(delta time.Duration) (Model, tea.Cmd) {
 	t := m.playback.Track
@@ -332,6 +347,9 @@ func sameTrack(a, b spotify.PlaybackState) bool {
 // honoring Spotify's Retry-After when rate-limited.
 func syncDelay(err error) time.Duration {
 	var ae *spotify.APIError
+	if errors.Is(err, spotify.ErrLoginExpired) {
+		return time.Hour // retrying can't fix this; the user has to sign in again
+	}
 	if errors.As(err, &ae) && ae.RetryAfter > syncInterval {
 		return ae.RetryAfter
 	}

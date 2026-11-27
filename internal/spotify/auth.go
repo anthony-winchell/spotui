@@ -116,6 +116,10 @@ func resumeLogin(ctx context.Context, hc *http.Client, clientID string, store To
 	return refreshAccessToken(ctx, hc, tokenEndpoint, clientID, rt)
 }
 
+// ErrLoginExpired means Spotify no longer accepts the saved login, e.g. because
+// the user revoked access; signing in again is the only fix
+var ErrLoginExpired = errors.New("spotify login expired")
+
 // isInvalidGrant reports whether Spotify rejected the grant, e.g. a revoked refresh token.
 func isInvalidGrant(err error) bool {
 	var te *TokenError

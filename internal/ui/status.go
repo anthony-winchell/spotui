@@ -34,6 +34,8 @@ func (s status) visible(now time.Time) bool {
 func errorText(err error) string {
 	var ae *spotify.APIError
 	switch {
+	case errors.Is(err, spotify.ErrLoginExpired):
+		return "Spotify login expired: restart spotui to sign in again"
 	case errors.Is(err, spotify.ErrNoActiveDevice):
 		return "No active device: open Spotify and start playing something"
 	case errors.Is(err, spotify.ErrPremiumRequired):

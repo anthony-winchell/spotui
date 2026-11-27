@@ -53,6 +53,9 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 
 	tok, err := refreshAccessToken(ctx, c.hc, c.tokenURL, c.clientID, c.tok.RefreshToken)
 	if err != nil {
+		if isInvalidGrant(err) {
+			return "", fmt.Errorf("%w: %w", ErrLoginExpired, err)
+		}
 		return "", fmt.Errorf("refresh access token: %w", err)
 	}
 

@@ -221,7 +221,11 @@ func (m Model) statusLine(now time.Time) string {
 	case m.status.visible(now):
 		return line.Render(m.status.text)
 	case m.err != nil && !errors.Is(m.err, spotify.ErrNoActiveDevice):
-		return line.Render(errorText(m.err) + " (retrying)")
+		text := errorText(m.err)
+		if !errors.Is(m.err, spotify.ErrLoginExpired) {
+			text += " (retrying)"
+		}
+		return line.Render(text)
 	}
 	return dimStyle.Render(m.hints())
 }
@@ -242,6 +246,10 @@ func (m Model) trackDetails(width int) string {
 	device := dimStyle.Render(fmt.Sprintf("on %s (%s)", p.Device.Name, p.Device.Type))
 	if p.Device.SupportsVolume {
 		device += dimStyle.Render(fmt.Sprintf(" • vol %d%%", p.Device.Volume))
+	}
+
+	if p.Device.Restricted {
+		device += dimStyle.Render(" • view only")
 	}
 
 	lines := []string{
