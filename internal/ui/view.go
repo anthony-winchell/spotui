@@ -41,10 +41,7 @@ func (m Model) View() tea.View {
 
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
 
-	hints := dimStyle.Render(m.hints())
-	if m.status.visible(time.Now()) {
-		hints = errorStyle.MaxWidth(m.width).Render(m.status.text)
-	}
+	hints := m.statusLine(time.Now())
 
 	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
@@ -216,6 +213,19 @@ func (m Model) hints() string {
 	return line
 }
 
+// statusLine returns the bottom line: a recent command error, then an
+// ongoing sync error, then the key hints
+func (m Model) statusLine(now time.Time) string {
+	line := errorStyle.MaxWidth(m.width)
+	switch {
+	case m.status.visible(now):
+		return line.Render(m.status.text)
+	case m.err != nil && !errors.Is(m.err, spotify.ErrNoActiveDevice):
+		return line.Render(errorText(m.err) + " (retrying)")
+	}
+	return dimStyle.Render(m.hints())
+}
+
 // trackDetails renders the current track's details, at most width cells wide
 func (m Model) trackDetails(width int) string {
 	p := m.playback
@@ -255,8 +265,8 @@ func (m Model) playbackNotice() string {
 		return dimStyle.Render("Loading...")
 	case errors.Is(m.err, spotify.ErrNoActiveDevice):
 		return dimStyle.Render("No active device. Open Spotify and start playing something.")
-	case m.err != nil:
-		return errorStyle.Render("Error: " + m.err.Error())
+	case m.err != nil && m.playback.Track == nil:
+		return errorStyle.Render("Couldn't reach Spotify")
 	case m.playback.Track == nil:
 		return dimStyle.Render("Nothing playing")
 	}

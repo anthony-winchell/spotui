@@ -37,11 +37,14 @@ func errorText(err error) string {
 	case errors.Is(err, spotify.ErrNoActiveDevice):
 		return "No active device: open Spotify and start playing something"
 	case errors.Is(err, spotify.ErrPremiumRequired):
-		return "That needs Spotify premium"
+		return "That needs Spotify Premium"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "Spotify didn't respond in time"
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusTooManyRequests:
-		return fmt.Sprintf("Rate limited by Spotify, trying again in %s", ae.RetryAfter.Round(time.Second))
+		if ae.RetryAfter > 0 {
+			return fmt.Sprintf("Rate limited by Spotify, trying again in %s", ae.RetryAfter.Round(time.Second))
+		}
+		return "Rate limited by Spotify"
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusForbidden:
 		return "Spotify won't allow that on this device"
 	case errors.As(err, &ae) && ae.Message != "":

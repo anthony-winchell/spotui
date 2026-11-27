@@ -75,7 +75,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		now := time.Now()
 		m.loading = false
 		m.fetching = false
-		m.err = nil
+		m.err = msg.err // stays set until a sync succeeds
 		m.nextSync = now.Add(syncDelay(msg.err))
 		switch {
 		case msg.err == nil:
@@ -85,11 +85,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.fetchArtwork(now)
 			return m, cmd
 		case errors.Is(msg.err, spotify.ErrNoActiveDevice):
-			m.err = msg.err
 			m.playback = spotify.PlaybackState{} // Spotify says nothing is playing
-		default:
-			m.status.set(errorText(msg.err)) // keep showing the last known state
 		}
+		// other errors: keep showing the last known state
 
 	case artworkMsg:
 		if msg.url != m.art.url {
@@ -114,7 +112,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playback.FetchedAt = now
 		m.playback.Playing = msg.playing
 		m.playPending.start(confirmTimeout)
-		m.err = nil
 		m.fetching = true
 		return m, fetchPlaybackAfter(m.client, settleDelay)
 
