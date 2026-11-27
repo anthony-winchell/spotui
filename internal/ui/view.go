@@ -15,6 +15,11 @@ import (
 // sidebarWidth is the sidebar's total width, including border and padding
 const sidebarWidth = 22
 
+const (
+	minWidth  = 50 // sidebar (22) plus usable main panel
+	minHeight = 16 // bottom panel (6) + hints (1) + sidebar (7), plus a little room
+)
+
 // searchWidth is how many cells of the query fit in the main panel
 func (m Model) searchWidth() int {
 	inner := m.width - sidebarWidth - panelStyle.GetHorizontalFrameSize()
@@ -23,14 +28,23 @@ func (m Model) searchWidth() int {
 
 // View renders the model
 func (m Model) View() tea.View {
-	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
-	hintText := "/ search • h/l panels • j/k move • enter play • space play/pause • n next • N prev • ,/. seek • +/- vol • s shuffle • r repeat • q quit"
+	v := tea.NewView("")
+	v.AltScreen = true
 
-	if m.search.Focused() {
-		hintText = "enter search • esc cancel • ctrl+c quit"
+	switch {
+	case m.width == 0:
+		return v // no WindowSizeMsg yet
+	case m.width < minWidth || m.height < minHeight:
+		v.Content = dimStyle.Render(fmt.Sprintf("Terminal too small: %dx%d (need %dx%d)", m.width, m.height, minWidth, minHeight))
+		return v
 	}
 
-	hints := dimStyle.Render(hintText)
+	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
+
+	hints := dimStyle.Render(m.hints())
+	if m.status.visible(time.Now()) {
+		hints = errorStyle.MaxWidth(m.width).Render(m.status.text)
+	}
 
 	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))
@@ -43,11 +57,10 @@ func (m Model) View() tea.View {
 	))
 
 	top := lipgloss.JoinHorizontal(lipgloss.Top,
-		m.panel(focusSidebar).Width(sidebarWidth).Height(topHeight).Render(m.sidebar()),
+		m.panel(focusSidebar).Width(sidebarWidth).Height(topHeight).MaxHeight(topHeight).Render(m.sidebar()),
 		main)
 
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, top, bottom, hints))
-	v.AltScreen = true
+	v.Content = lipgloss.JoinVertical(lipgloss.Left, top, bottom, hints)
 	return v
 }
 
@@ -132,7 +145,7 @@ func (m Model) nowPlaying() string {
 	parts = append(parts, modeLabel("shuffle", m.playback.Shuffle), repeatLabel(m.playback.Repeat))
 	lines = append(lines, strings.Join(parts, dimStyle.Render(" • ")))
 
-	return strings.Join(lines, "\n")
+	return lipgloss.NewStyle().MaxWidth(inner).Render(strings.Join(lines, "\n"))
 }
 
 const (
@@ -170,6 +183,37 @@ func (m Model) artworkView(width, height int) string {
 // artPlaceholder draws an empty frame where album artwork will go
 func artPlaceholder(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Border(lipgloss.RoundedBorder()).BorderForeground(colorComment).Foreground(colorComment).Align(lipgloss.Center, lipgloss.Center).Render("♪")
+}
+
+// hints returns the key help for the current context, as many as fit in the terminal width
+func (m Model) hints() string {
+	var keys []string
+	switch {
+	case m.search.Focused():
+		keys = []string{"enter search", "esc cancel", "ctrl+c quit"}
+	case m.focus == focusSidebar:
+		keys = []string{"j/k sections", "l open", "/ search"}
+	default:
+		keys = []string{"j/k move", "enter play", "n/N next/prev", "/ search"}
+	}
+
+	if !m.search.Focused() {
+		keys = append(keys, "space pause/play", "esc/h back", ",/. seek", "-/+ vol", "s shuffle", "r repeat", "q quit")
+	}
+
+	line := ""
+
+	for _, k := range keys {
+		next := k
+		if line != "" {
+			next = line + " • " + k
+		}
+		if lipgloss.Width(next) > m.width {
+			break // keep whole hints only
+		}
+		line = next
+	}
+	return line
 }
 
 // trackDetails renders the current track's details, at most width cells wide

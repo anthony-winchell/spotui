@@ -32,7 +32,7 @@ const (
 	// volumeStep is how much +/- changes the volume, in percent
 	volumeStep = 5
 
-	// seekStep is how far h/l jumps
+	// seekStep is how far ,/. jumps
 	seekStep = 5 * time.Second
 
 	// seekTolerance is how close a fetched position must be to ours to count as confirmed
@@ -58,6 +58,7 @@ type Model struct {
 
 	active section // highlighted sidebar entry
 	focus  focus   // panel that receives j/k
+	status status  // short-lived message, e.g. a failed command
 
 	playlists listData[spotify.Playlist]
 	liked     listData[spotify.Track]

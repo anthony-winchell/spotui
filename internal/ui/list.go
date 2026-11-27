@@ -88,7 +88,7 @@ func (l *listData[T]) apply(msg listMsg[T]) {
 	}
 	l.items = append(l.items, msg.items...)
 	l.hasMore = msg.hasMore
-	l.loading = true
+	l.loaded = true
 }
 
 // selected returns the highlighted item, or false if the list is empty
