@@ -42,16 +42,27 @@ func NewClient(clientID string, tok Token, store TokenStore) *Client {
 	}
 }
 
-// accessToken returns a valid access token, refreshing it first if it is about to expire.
+// accessToken returns a valid access token, refreshing it first if it is about
+// to expire. Other spotui processes share the store, so it checks there before
+// refreshing: one of them may have refreshed already
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if time.Until(c.tok.Expiry) > expiryMargin {
+	if valid(c.tok) {
 		return c.tok.AccessToken, nil
 	}
 
-	tok, err := refreshAccessToken(ctx, c.hc, c.tokenURL, c.clientID, c.tok.RefreshToken)
+	c.adoptStored()
+	if valid(c.tok) {
+		return c.tok.AccessToken, nil // another process refreshed it
+	}
+
+	used := c.tok.RefreshToken
+	tok, err := refreshAccessToken(ctx, c.hc, c.tokenURL, c.clientID, used)
+	if isInvalidGrant(err) && c.awaitRotation(ctx, used) {
+		return c.tok.AccessToken, nil // another process refreshed at the same moment
+	}
 	if err != nil {
 		if isInvalidGrant(err) {
 			return "", fmt.Errorf("%w: %w", ErrLoginExpired, err)
@@ -59,15 +70,47 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("refresh access token: %w", err)
 	}
 
-	rotated := tok.RefreshToken != c.tok.RefreshToken
 	c.tok = tok
-	if rotated {
-		if err := c.store.Save(tok.RefreshToken); err != nil {
-			return "", err
+	if err := c.store.Save(tok); err != nil {
+		return "", err
+	}
+	return c.tok.AccessToken, nil
+}
+
+// adoptStored replaces c.tok with the saved token. Errors are ignored: the
+// token we already have is still worth trying.
+func (c *Client) adoptStored() {
+	if c.store == nil {
+		return
+	}
+	if tok, err := c.store.Load(); err == nil {
+		c.tok = tok
+	}
+}
+
+// awaitRotation waits briefly for another process's token to appear in the
+// store. If two processes refresh at once, Spotify rotates the refresh token
+// for the first and rejects the second; the first saves its new token just
+// after Spotify answers, so the second may have to wait a moment for it.
+func (c *Client) awaitRotation(ctx context.Context, used string) bool {
+	for range 10 {
+		c.adoptStored()
+		if c.tok.RefreshToken != used && valid(c.tok) {
+			return true
+		}
+
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
+	return false
+}
 
-	return c.tok.AccessToken, nil
+// valid reports whether tok's access token will work for at least expiryMargin
+func valid(tok Token) bool {
+	return tok.AccessToken != "" && time.Until(tok.Expiry) > expiryMargin
 }
 
 // do sends an authenticated API request.

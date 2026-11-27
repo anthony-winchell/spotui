@@ -97,26 +97,54 @@ func Authenticate(ctx context.Context, clientID string, store TokenStore) (Token
 	tok, err := resumeLogin(ctx, hc, clientID, store)
 	if errors.Is(err, ErrNoToken) || isInvalidGrant(err) || (err == nil && missingScopes(tok.Scope)) {
 		tok, err = Login(ctx, clientID)
+		if err == nil {
+			err = store.Save(tok)
+		}
 	}
 	if err != nil {
-		return Token{}, err
-	}
-
-	if err := store.Save(tok.RefreshToken); err != nil {
 		return Token{}, err
 	}
 
 	return tok, nil
 }
 
-// resumeLogin refreshes the access token using the saved refresh token
+// ErrNeedsLogin means there is no usable saved login, and the caller can't open
+// the browser to make one
+var ErrNeedsLogin = errors.New("not logged in")
+
+// Resume returns a token from the saved login, and never opens the browser.
+// It's for commands run by scripts, where nobody is there to log in
+func Resume(ctx context.Context, clientID string, store TokenStore) (Token, error) {
+	hc := &http.Client{Timeout: 15 * time.Second}
+
+	tok, err := resumeLogin(ctx, hc, clientID, store)
+	switch {
+	case errors.Is(err, ErrNoToken), isInvalidGrant(err), err == nil && missingScopes(tok.Scope):
+		return Token{}, ErrNeedsLogin
+	case err != nil:
+		return Token{}, err
+	}
+	return tok, nil
+}
+
+// resumeLogin returns the saved token, refreshing it first if it has expired
 func resumeLogin(ctx context.Context, hc *http.Client, clientID string, store TokenStore) (Token, error) {
-	rt, err := store.Load()
+	tok, err := store.Load()
 	if err != nil {
 		return Token{}, err
 	}
+	if valid(tok) {
+		return tok, nil // still good: no request needed
+	}
 
-	return refreshAccessToken(ctx, hc, tokenEndpoint, clientID, rt)
+	tok, err = refreshAccessToken(ctx, hc, tokenEndpoint, clientID, tok.RefreshToken)
+	if err != nil {
+		return Token{}, err
+	}
+	if err := store.Save(tok); err != nil {
+		return Token{}, err
+	}
+	return tok, nil
 }
 
 // ErrLoginExpired means Spotify no longer accepts the saved login, e.g. because

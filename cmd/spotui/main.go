@@ -35,44 +35,79 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	tok, err := spotify.Authenticate(ctx, cfg.ClientID, spotify.KeyringStore{})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	client := spotify.NewClient(cfg.ClientID, tok, spotify.KeyringStore{})
-	me, err := client.CurrentUser(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("logged in as %s\n", me.DisplayName)
-
 	if len(os.Args) == 1 {
-		if _, err := tea.NewProgram(ui.New(client, me.ID)).Run(); err != nil {
+		if err := runTUI(cfg); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
 
-	cmdErr := runCommand(ctx, client, os.Args[1:])
-
-	switch {
-	case errors.Is(cmdErr, spotify.ErrNoActiveDevice):
-		fmt.Println("No active device: open Spotify and start playback")
-	case errors.Is(cmdErr, spotify.ErrPremiumRequired):
-		fmt.Println("Playback control requires Spotify Premium")
-	case cmdErr != nil:
-		log.Fatal(cmdErr)
+	if err := runCLI(cfg, os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "spotui:", cliErrorText(err))
+		os.Exit(1)
 	}
+}
+
+// runTUI logs in, through the browser if needed, and runs interactions
+func runTUI(cfg config.Config) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute) // time to log in
+	defer cancel()
+
+	tok, err := spotify.Authenticate(ctx, cfg.ClientID, spotify.KeyringStore{})
+	if err != nil {
+		return err
+	}
+
+	client := spotify.NewClient(cfg.ClientID, tok, spotify.KeyringStore{})
+	me, err := client.CurrentUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	_, err = tea.NewProgram(ui.New(client, me.ID)).Run()
+	return err
+}
+
+// runCLI runs one command with the saved login. It prints nothing on success
+// unless the command has output, so scripts and the Neovim plugin can use it
+func runCLI(cfg config.Config, args []string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	tok, err := spotify.Resume(ctx, cfg.ClientID, spotify.KeyringStore{})
+	if err != nil {
+		return err
+	}
+
+	client := spotify.NewClient(cfg.ClientID, tok, spotify.KeyringStore{})
+	return runCommand(ctx, client, args)
+}
+
+// cliErrorText turns an error into a short one-line message
+func cliErrorText(err error) string {
+	switch {
+	case errors.Is(err, spotify.ErrNeedsLogin), errors.Is(err, spotify.ErrLoginExpired):
+		return "not logged in: run spotui to sign in"
+	case errors.Is(err, spotify.ErrNoActiveDevice):
+		return "no active device: open Spotify and start playback"
+	case errors.Is(err, spotify.ErrPremiumRequired):
+		return "playback control requires Spotify Premium"
+	}
+	return err.Error()
 }
 
 // runCommand runs one playback command from the command line.
 func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
+	args, asJSON := cutFlag(args, "--json")
+	if len(args) == 0 {
+		return errors.New("no command given")
+	}
+
 	switch args[0] {
 	case "status":
+		if asJSON {
+			return printStatusJSON(ctx, c)
+		}
 		return printStatus(ctx, c)
 	case "play":
 		return c.Play(ctx)
@@ -92,18 +127,22 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 	case "prev":
 		return c.Previous(ctx)
 	case "seek":
-		secs, err := intArg(args)
-		if err != nil {
-			return err
-		}
-		return c.Seek(ctx, time.Duration(secs)*time.Second)
+		return seek(ctx, c, args)
 	case "vol":
-		pct, err := intArg(args)
-		if err != nil {
-			return err
+		return setVolume(ctx, c, args)
+	case "shuffle":
+		return toggleShuffle(ctx, c)
+	case "repeat":
+		return cycleRepeat(ctx, c)
+	case "play-uri":
+		if len(args) < 2 {
+			return errors.New("play-uri needs a Spotify URI")
 		}
-		return c.SetVolume(ctx, pct)
+		return playURI(ctx, c, args[1])
 	case "playlists":
+		if asJSON {
+			return printPlaylistsJSON(ctx, c)
+		}
 		return printPlaylists(ctx, c)
 	case "playlist":
 		n, err := intArg(args)
@@ -112,6 +151,9 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		}
 		return playPlaylist(ctx, c, n)
 	case "liked":
+		if asJSON {
+			return printLikedJSON(ctx, c)
+		}
 		if len(args) == 1 {
 			return printLikedSongs(ctx, c)
 		}
@@ -126,30 +168,12 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		if len(args) < 2 {
 			return fmt.Errorf("search needs a query")
 		}
+		if asJSON {
+			return printSearchJSON(ctx, c, strings.Join(args[1:], " "))
+		}
 		return printSearch(ctx, c, strings.Join(args[1:], " "))
-	case "like", "unlike":
-		st, err := c.Playback(ctx)
-		if err != nil {
-			return err
-		}
-		if st.Track == nil {
-			return errors.New("nothing playing")
-		}
-		uri := st.Track.URI
-		if args[0] == "like" {
-			err = c.Like(ctx, uri)
-		} else {
-			err = c.Unlike(ctx, uri)
-		}
-		if err != nil {
-			return err
-		}
-		liked, err := c.Liked(ctx, uri)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("%s: like = %v\n", st.Track.Name, liked[0])
-		return nil
+	case "like", "unlike", "togglelike":
+		return setLike(ctx, c, args[0])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -248,29 +272,18 @@ func printLikedSongs(ctx context.Context, c *spotify.Client) error {
 	return nil
 }
 
-// playLikedSongs plays up to one page of Liked Songs, starting at song n (1-based)
+// playLikedSongs plays Liked Songs from song n (1-based), continuing through
+// the whole library like the TUI does
 func playLikedSongs(ctx context.Context, c *spotify.Client, n int) error {
 	if n < 1 {
 		return fmt.Errorf("song numbers start at 1")
 	}
 
-	page, err := c.LikedSongs(ctx, n-1)
+	me, err := c.CurrentUser(ctx)
 	if err != nil {
 		return err
 	}
-
-	if len(page.Items) == 0 {
-		return fmt.Errorf("no liked song %d: you have %d", n, page.Total)
-	}
-
-	uris := make([]string, len(page.Items))
-	for i, t := range page.Items {
-		uris[i] = t.URI
-	}
-
-	first := page.Items[0]
-	fmt.Printf("playing %s by %s (+%d more)\n", first.Name, strings.Join(first.Artists, ", "), len(uris)-1)
-	return c.PlayTracks(ctx, uris, 0)
+	return c.PlayContext(ctx, spotify.LikedSongsURI(me.ID), n-1)
 }
 
 // printRecent prints the user's recently played tracks, newest first

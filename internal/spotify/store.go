@@ -1,8 +1,10 @@
 package spotify
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/zalando/go-keyring"
 )
@@ -15,31 +17,47 @@ const (
 // ErrNoToken means no refresh token has been saved yet.
 var ErrNoToken = errors.New("no saved Spotify token")
 
-// TokenStore persists the refresh token between runs
+// TokenStore persists the token between runs, so separate spotui processes
+// (the TUI, the CLI commands the Neovim plugin runs) share one login
 type TokenStore interface {
-	Load() (string, error) // returns ErrNoToken if nothing is saved
-	Save(refreshToken string) error
+	Load() (Token, error) // returns ErrNoToken if nothing is saved
+	Save(tok Token) error
 }
 
-// KeyringStore stores the refresh token in the OS credential store
+// KeyringStore stores the token as JSON in the OS credential store
 // (Windows Credential Manager, macOS Keychain, Linux Secret Service)
 type KeyringStore struct{}
 
-func (KeyringStore) Load() (string, error) {
-	rt, err := keyring.Get(keyringService, keyringUser)
+func (KeyringStore) Load() (Token, error) {
+	s, err := keyring.Get(keyringService, keyringUser)
 	if errors.Is(err, keyring.ErrNotFound) {
-		return "", ErrNoToken
+		return Token{}, ErrNoToken
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("read credential store: %w", err)
+		return Token{}, fmt.Errorf("read credential store: %w", err)
 	}
 
-	return rt, nil
+	// Older versions saved the refresh token, as plain text
+	if !strings.HasPrefix(s, "{") {
+		return Token{RefreshToken: s}, nil
+	}
+
+	var tok Token
+	if err := json.Unmarshal([]byte(s), &tok); err != nil {
+		return Token{}, fmt.Errorf("read credential store: %w", err)
+	}
+
+	return tok, nil
 }
 
-func (KeyringStore) Save(refreshToken string) error {
-	if err := keyring.Set(keyringService, keyringUser, refreshToken); err != nil {
+func (KeyringStore) Save(tok Token) error {
+	b, err := json.Marshal(tok)
+	if err != nil {
+		return fmt.Errorf("encode token: %w", err)
+	}
+
+	if err := keyring.Set(keyringService, keyringUser, string(b)); err != nil {
 		return fmt.Errorf("save to credential store: %w", err)
 	}
 
