@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -49,6 +50,30 @@ func (c *Client) LikedSongs(ctx context.Context, offset int) (Page[Track], error
 // Spotify doesn't document it, but playback accepts it with a position offset
 func LikedSongsURI(userID string) string {
 	return "spotify:user:" + userID + ":collection"
+}
+
+// Like saves tracks to the user's Liked Songs
+func (c *Client) Like(ctx context.Context, uris ...string) error {
+	return c.do(ctx, http.MethodPut, "/me/library", libraryQuery(uris), nil, nil)
+}
+
+// Unlike removes tracks from a user's Liked Songs
+func (c *Client) Unlike(ctx context.Context, uris ...string) error {
+	return c.do(ctx, http.MethodDelete, "/me/library", libraryQuery(uris), nil, nil)
+}
+
+// Liked reports, for each uri in order, whether it is in the user's Liked Songs
+func (c *Client) Liked(ctx context.Context, uris ...string) ([]bool, error) {
+	var liked []bool
+	if err := c.do(ctx, http.MethodGet, "/me/library/contains", libraryQuery(uris), nil, &liked); err != nil {
+		return nil, err
+	}
+	return liked, nil
+}
+
+// libraryQuery builds the uris parameter of the library endpoints
+func libraryQuery(uris []string) url.Values {
+	return url.Values{"uris": {strings.Join(uris, ",")}}
 }
 
 // RecentlyPlayed returns the user's most recent plays, newest first.

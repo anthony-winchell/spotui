@@ -70,7 +70,8 @@ type Model struct {
 	loading  bool
 	err      error
 
-	art artwork // artwork of the current track
+	art  artwork    // artwork of the current track
+	like likeStatus // whether the current track is liked
 
 	volPending     pending // local volume change awaiting confirmation
 	seekPending    pending // local seek awaiting confirmation

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -38,6 +39,8 @@ const (
 var scopes = []string{
 	"user-read-playback-state",
 	"user-read-currently-playing",
+	"user-library-read",
+	"user-library-modify",
 	"user-modify-playback-state",
 	"playlist-read-private",
 	"playlist-read-collaborative",
@@ -92,7 +95,7 @@ func Authenticate(ctx context.Context, clientID string, store TokenStore) (Token
 	hc := &http.Client{Timeout: 15 * time.Second}
 
 	tok, err := resumeLogin(ctx, hc, clientID, store)
-	if errors.Is(err, ErrNoToken) || isInvalidGrant(err) {
+	if errors.Is(err, ErrNoToken) || isInvalidGrant(err) || (err == nil && missingScopes(tok.Scope)) {
 		tok, err = Login(ctx, clientID)
 	}
 	if err != nil {
@@ -124,4 +127,20 @@ var ErrLoginExpired = errors.New("spotify login expired")
 func isInvalidGrant(err error) bool {
 	var te *TokenError
 	return errors.As(err, &te) && te.Code == "invalid_grant"
+}
+
+// missingScopes reports whether a token lacks any scopes spotui needs.
+// An empty scope means Spotify didn't say, so we keep the token
+func missingScopes(granted string) bool {
+	if granted == "" {
+		return false
+	}
+
+	have := strings.Fields(granted)
+	for _, s := range scopes {
+		if !slices.Contains(have, s) {
+			return true
+		}
+	}
+	return false
 }

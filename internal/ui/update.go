@@ -47,6 +47,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.toggleShuffle()
 		case "r":
 			return m.cycleRepeat()
+		case "f":
+			return m.toggleLike()
 		case "h", "esc":
 			m.focus = focusSidebar
 		case "/":
@@ -86,8 +88,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			prev := m.playback
 			m.playback = msg.state
 			m.reconcile(prev, now)
-			cmd := m.fetchArtwork(now)
-			return m, cmd
+			art := m.fetchArtwork(now)
+			like := m.checkLiked()
+			return m, tea.Batch(art, like)
 		case errors.Is(msg.err, spotify.ErrNoActiveDevice):
 			m.playback = spotify.PlaybackState{} // Spotify says nothing is playing
 		}
@@ -103,6 +106,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil // the placeholder stays up
 		}
 		m.art.img = msg.img
+
+	case likedMsg:
+		if msg.uri != m.like.uri {
+			return m, nil
+		}
+		m.like.checking = false
+		if msg.err == nil {
+			m.like.known = true
+			m.like.liked = msg.liked
+		}
+	// on error, known state stays false and the next sync asks again
+
+	case likeDoneMsg:
+		if msg.uri == m.like.uri {
+			m.like.saving = false
+			if msg.err != nil {
+				m.like.liked = !msg.liked // undo the optimistic change
+			}
+		}
+		if msg.err != nil {
+			m.status.set(errorText(msg.err))
+			return m, nil
+		}
+		m.liked = listData[spotify.Track]{} // Liked Songs changed; reload
+
+		cmd := m.fetchActive()
+		return m, cmd
 
 	case toggledMsg:
 		if msg.err != nil {

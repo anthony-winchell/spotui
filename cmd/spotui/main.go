@@ -127,6 +127,29 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 			return fmt.Errorf("search needs a query")
 		}
 		return printSearch(ctx, c, strings.Join(args[1:], " "))
+	case "like", "unlike":
+		st, err := c.Playback(ctx)
+		if err != nil {
+			return err
+		}
+		if st.Track == nil {
+			return errors.New("nothing playing")
+		}
+		uri := st.Track.URI
+		if args[0] == "like" {
+			err = c.Like(ctx, uri)
+		} else {
+			err = c.Unlike(ctx, uri)
+		}
+		if err != nil {
+			return err
+		}
+		liked, err := c.Liked(ctx, uri)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s: like = %v\n", st.Track.Name, liked[0])
+		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}

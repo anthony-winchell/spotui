@@ -128,7 +128,7 @@ func (m Model) nowPlaying() string {
 	bar := progressBar(pos, t.Duration, inner-lipgloss.Width(times))
 
 	lines := []string{
-		icon + " " + titleStyle.Render(t.Name),
+		icon + " " + titleStyle.Render(t.Name) + m.heart(),
 		artistStyle.Render(strings.Join(t.Artists, ", ")),
 		bar + times,
 	}
@@ -195,7 +195,7 @@ func (m Model) hints() string {
 	}
 
 	if !m.search.Focused() {
-		keys = append(keys, "space pause/play", "esc/h back", ",/. seek", "-/+ vol", "s shuffle", "r repeat", "q quit")
+		keys = append(keys, "space pause/play", "esc/h back", ",/. seek", "-/+ vol", "s shuffle", "r repeat", "f like", "q quit")
 	}
 
 	line := ""
@@ -253,7 +253,7 @@ func (m Model) trackDetails(width int) string {
 	}
 
 	lines := []string{
-		titleStyle.Render(t.Name),
+		titleStyle.Render(t.Name) + m.heart(),
 		artistStyle.Render(strings.Join(t.Artists, ", ")),
 		dimStyle.Render(t.Album),
 		"",
