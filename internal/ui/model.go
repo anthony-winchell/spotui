@@ -32,7 +32,7 @@ const (
 	// volumeStep is how much +/- changes the volume, in percent
 	volumeStep = 5
 
-	// seekStep is how far h/l jumps
+	// seekStep is how far ,/. jumps
 	seekStep = 5 * time.Second
 
 	// seekTolerance is how close a fetched position must be to ours to count as confirmed
