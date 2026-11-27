@@ -45,6 +45,12 @@ func (c *Client) LikedSongs(ctx context.Context, offset int) (Page[Track], error
 	}), nil
 }
 
+// LikedSongsURI returns the context URI of the user's Liked Songs.
+// Spotify doesn't document it, but playback accepts it with a position offset
+func LikedSongsURI(userID string) string {
+	return "spotify:user:" + userID + ":collection"
+}
+
 // RecentlyPlayed returns the user's most recent plays, newest first.
 // Spotify keeps only the last 50, so this is a single request
 func (c *Client) RecentlyPlayed(ctx context.Context) ([]Play, error) {

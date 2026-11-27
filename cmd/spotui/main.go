@@ -51,7 +51,7 @@ func main() {
 	fmt.Printf("logged in as %s\n", me.DisplayName)
 
 	if len(os.Args) == 1 {
-		if _, err := tea.NewProgram(ui.New(client)).Run(); err != nil {
+		if _, err := tea.NewProgram(ui.New(client, me.ID)).Run(); err != nil {
 			log.Fatal(err)
 		}
 		return

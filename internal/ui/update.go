@@ -399,9 +399,10 @@ func (m Model) playSelected() tea.Cmd {
 		if len(m.liked.items) == 0 {
 			return nil
 		}
-		uris := trackURIs(m.liked.items[m.liked.cursor:], playQueueSize)
+		uri := spotify.LikedSongsURI(m.userID)
+		pos := m.liked.cursor
 		return runCommand(func(ctx context.Context) error {
-			return m.client.PlayTracks(ctx, uris, 0)
+			return m.client.PlayContext(ctx, uri, pos)
 		})
 	case sectionRecent:
 		p, ok := m.recent.selected()
@@ -419,16 +420,6 @@ func (m Model) playSelected() tea.Cmd {
 		return r.play(m.client)
 	}
 	return nil
-}
-
-// trackURIs returns the URIs of the first n tracks
-func trackURIs(tracks []spotify.Track, n int) []string {
-	tracks = tracks[:min(n, len(tracks))]
-	uris := make([]string, len(tracks))
-	for i, t := range tracks {
-		uris[i] = t.URI
-	}
-	return uris
 }
 
 // startSearch jumps to the Search section and focuses the search box

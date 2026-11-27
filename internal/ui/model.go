@@ -38,9 +38,6 @@ const (
 	// seekTolerance is how close a fetched position must be to ours to count as confirmed
 	seekTolerance = 1500 * time.Millisecond
 
-	// playQueueSize is how many liked songs are sent when starting playback from one
-	playQueueSize = 50
-
 	// artworkRetryDelay is how long to wait before retrying a failed artwork download
 	artworkRetryDelay = 30 * time.Second
 )
@@ -55,6 +52,7 @@ const (
 // Model is the root Bubble Tea Model
 type Model struct {
 	client *spotify.Client
+	userID string // the logged-in user, for the Liked Songs context
 
 	active section // highlighted sidebar entry
 	focus  focus   // panel that receives j/k
@@ -87,7 +85,7 @@ type Model struct {
 }
 
 // New returns the initial Model
-func New(client *spotify.Client) Model {
+func New(client *spotify.Client, userID string) Model {
 	in := textinput.New()
 	in.Prompt = "/ "
 	in.Placeholder = "tracks, artists, albums"
@@ -98,7 +96,7 @@ func New(client *spotify.Client) Model {
 	s.Blurred.Placeholder = dimStyle
 	in.SetStyles(s)
 
-	return Model{client: client, loading: true, fetching: true, search: in} // Init starts a fetch
+	return Model{client: client, userID: userID, loading: true, fetching: true, search: in} // Init starts a fetch
 }
 
 // Init runs once at startup; its command loads the initial state
