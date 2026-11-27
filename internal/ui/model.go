@@ -58,6 +58,7 @@ type Model struct {
 
 	active section // highlighted sidebar entry
 	focus  focus   // panel that receives j/k
+	status status  // short-lived message, e.g. a failed command
 
 	playlists listData[spotify.Playlist]
 	liked     listData[spotify.Track]

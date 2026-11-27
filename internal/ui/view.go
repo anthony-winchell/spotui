@@ -42,6 +42,9 @@ func (m Model) View() tea.View {
 	bottom := panelStyle.Width(m.width).Render(m.nowPlaying())
 
 	hints := dimStyle.Render(m.hints())
+	if m.status.visible(time.Now()) {
+		hints = errorStyle.MaxWidth(m.width).Render(m.status.text)
+	}
 
 	// Whatever height is left over after the bottom rows goes to the top row
 	topHeight := max(0, m.height-lipgloss.Height(bottom)-lipgloss.Height(hints))

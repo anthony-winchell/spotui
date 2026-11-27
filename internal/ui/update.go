@@ -75,7 +75,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		now := time.Now()
 		m.loading = false
 		m.fetching = false
-		m.err = msg.err
+		m.err = nil
 		m.nextSync = now.Add(syncDelay(msg.err))
 		switch {
 		case msg.err == nil:
@@ -85,7 +85,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.fetchArtwork(now)
 			return m, cmd
 		case errors.Is(msg.err, spotify.ErrNoActiveDevice):
+			m.err = msg.err
 			m.playback = spotify.PlaybackState{} // Spotify says nothing is playing
+		default:
+			m.status.set(errorText(msg.err)) // keep showing the last known state
 		}
 
 	case artworkMsg:
@@ -101,7 +104,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case toggledMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.status.set(errorText(msg.err))
 			return m, nil
 		}
 
@@ -117,7 +120,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commandDoneMsg:
 		if msg.err != nil {
-			m.err = msg.err
+			m.status.set(errorText(msg.err))
 			return m, nil
 		}
 		// We can't predict the new track, so ask Spotify once it has settled
