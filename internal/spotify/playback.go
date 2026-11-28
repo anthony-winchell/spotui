@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,8 +67,12 @@ type playbackResponse struct {
 
 // Playback returns the current playback state, or ErrNoActiveDevice
 func (c *Client) Playback(ctx context.Context) (PlaybackState, error) {
+	// Without additional_types, Spotify reports no item at all while a
+	// podcast episode plays
+	q := url.Values{"additional_types": {"episode"}}
+
 	var pr *playbackResponse
-	if err := c.do(ctx, http.MethodGet, "/me/player", nil, nil, &pr); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/me/player", q, nil, &pr); err != nil {
 		return PlaybackState{}, err
 	}
 
@@ -99,16 +104,21 @@ type playBody struct {
 	Offset     *playOffset `json:"offset,omitempty"`
 }
 
-// playOffset says which track in the context or URI list to start from
+// playOffset says which track in the context or URI list to start from:
+// by its position, or by its URI. Set one of them.
 type playOffset struct {
-	Position int `json:"position"`
+	Position *int   `json:"position,omitempty"` // a pointer, so position 0 is still sent
+	URI      string `json:"uri,omitempty"`
 }
 
 // playerCommand sends a player-control request and maps well-known
 // player failures to sentinel errors
 func (c *Client) playerCommand(ctx context.Context, method, path string, query url.Values, body any) error {
-	err := c.do(ctx, method, path, query, body, nil)
+	return playerError(c.do(ctx, method, path, query, body, nil))
+}
 
+// playerError maps well-known player failures to sentinel errors
+func playerError(err error) error {
 	var ae *APIError
 	if errors.As(err, &ae) {
 		switch ae.Reason {
@@ -133,10 +143,49 @@ func (c *Client) PlayContext(ctx context.Context, contextURI string, position in
 	// Spotify only accepts an offset for albums and playlists; leave it out
 	// when starting from the top so artist contexts work too
 	if position > 0 {
-		body.Offset = &playOffset{Position: position}
+		body.Offset = &playOffset{Position: &position}
 	}
 
 	return c.playerCommand(ctx, http.MethodPut, "/me/player/play", nil, body)
+}
+
+// PlayTrackIn plays trackURI within contextURI, so playback carries on through
+// the rest of that album, playlist or Liked Songs. Spotify only accepts a
+// starting track for those contexts, so with any other context, or none, the
+// track plays on its own. It also plays on its own if Spotify refuses the
+// context, e.g. because the track has since been taken out of the playlist.
+func (c *Client) PlayTrackIn(ctx context.Context, contextURI, trackURI string) error {
+	if !acceptsOffset(contextURI) {
+		return c.PlayTracks(ctx, []string{trackURI}, 0)
+	}
+
+	body := playBody{ContextURI: contextURI, Offset: &playOffset{URI: trackURI}}
+	err := c.playerCommand(ctx, http.MethodPut, "/me/player/play", nil, body)
+	if refusedContext(err) {
+		return c.PlayTracks(ctx, []string{trackURI}, 0)
+	}
+	return err
+}
+
+// acceptsOffset reports whether Spotify can start contextURI at a given track
+func acceptsOffset(contextURI string) bool {
+	return strings.HasPrefix(contextURI, "spotify:album:") ||
+		strings.HasPrefix(contextURI, "spotify:playlist:") ||
+		strings.HasSuffix(contextURI, ":collection") // Liked Songs
+}
+
+// refusedContext reports whether err is Spotify rejecting the request itself,
+// rather than something that playing the track alone wouldn't fix either
+func refusedContext(err error) bool {
+	var ae *APIError
+	if !errors.As(err, &ae) || errors.Is(err, ErrNoActiveDevice) || errors.Is(err, ErrPremiumRequired) {
+		return false
+	}
+	switch ae.StatusCode {
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound:
+		return true
+	}
+	return false
 }
 
 // PlayTracks plays a list of track URIs, starting at position.
@@ -148,7 +197,7 @@ func (c *Client) PlayTracks(ctx context.Context, uris []string, position int) er
 
 	body := playBody{
 		URIs:   uris,
-		Offset: &playOffset{Position: position},
+		Offset: &playOffset{Position: &position},
 	}
 
 	return c.playerCommand(ctx, http.MethodPut, "/me/player/play", nil, body)

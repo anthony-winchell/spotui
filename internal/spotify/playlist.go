@@ -2,6 +2,7 @@ package spotify
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -68,4 +69,47 @@ func (c *Client) Playlists(ctx context.Context, offset int) (Page[Playlist], err
 	}
 
 	return mapPage(pr, playlistObject.toPlaylist), nil
+}
+
+// playlistItemsPageSize is the most playlist entries Spotify returns per request
+const playlistItemsPageSize = 50
+
+// ErrPlaylistHidden means Spotify won't list a playlist's tracks. Since
+// February 2026 it only lists them for playlists the user owns or collaborates on.
+var ErrPlaylistHidden = errors.New("spotify only lists the tracks of playlists you own or collaborate on")
+
+// playlistItemObject is one entry in a playlist. The track or episode is null
+// if it's no longer available.
+type playlistItemObject struct {
+	Item *trackObject `json:"item"` // called "track" before February 2026
+}
+
+func (p playlistItemObject) toTrack() Track {
+	if p.Item == nil {
+		return Track{Name: "(unavailable)"}
+	}
+	return p.Item.toTrack()
+}
+
+// PlaylistTracks returns one page of a playlist's tracks, in playlist order.
+// Unavailable entries are kept, as tracks with no URI, so that a track's index
+// is still its position in the playlist.
+func (c *Client) PlaylistTracks(ctx context.Context, playlistID string, offset int) (Page[Track], error) {
+	q := url.Values{
+		"limit":  {strconv.Itoa(playlistItemsPageSize)},
+		"offset": {strconv.Itoa(offset)},
+	}
+
+	var pr pagingResponse[playlistItemObject]
+	err := c.do(ctx, http.MethodGet, "/playlists/"+url.PathEscape(playlistID)+"/items", q, nil, &pr)
+
+	var ae *APIError
+	if errors.As(err, &ae) && ae.StatusCode == http.StatusForbidden {
+		return Page[Track]{}, ErrPlaylistHidden
+	}
+	if err != nil {
+		return Page[Track]{}, err
+	}
+
+	return mapPage(pr, playlistItemObject.toTrack), nil
 }

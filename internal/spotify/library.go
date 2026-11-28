@@ -19,14 +19,18 @@ type savedTrackObject struct {
 
 // Play is one entry in the user's listening history
 type Play struct {
-	Track    Track
-	PlayedAt time.Time
+	Track      Track
+	PlayedAt   time.Time
+	ContextURI string // the album, playlist or artist it was played from; "" if none
 }
 
 // playHistoryObject is Spotify's JSON play history object
 type playHistoryObject struct {
 	Track    trackObject `json:"track"`
 	PlayedAt time.Time   `json:"played_at"`
+	Context  *struct {
+		URI string `json:"uri"`
+	} `json:"context"` // null if the track wasn't played from a context
 }
 
 // LikedSongs returns one page of the user's Liked Songs, most recently liked first.
@@ -92,6 +96,9 @@ func (c *Client) RecentlyPlayed(ctx context.Context) ([]Play, error) {
 	plays := make([]Play, len(resp.Items))
 	for i, it := range resp.Items {
 		plays[i] = Play{Track: it.Track.toTrack(), PlayedAt: it.PlayedAt}
+		if it.Context != nil {
+			plays[i].ContextURI = it.Context.URI
+		}
 	}
 
 	return plays, nil
