@@ -121,7 +121,7 @@ function M.active()
   return d ~= nil and d.active and d.track ~= nil
 end
 
----The statusline text, e.g. "▶ Creep — Radiohead 1:02/3:58", or "" when
+---The statusline text, e.g. "▶ Creep — Radiohead ♥ 1:02/3:58", or "" when
 ---nothing is playing
 function M.text()
   if not M.active() then
@@ -139,6 +139,9 @@ function M.text()
     name = name .. " — " .. table.concat(d.artists, ", ")
   end
   name = truncate(name, config.options.statusline.max_width)
+  if d.liked and config.options.statusline.show_liked then
+    name = name .. " ♥"
+  end
 
   local text = ("%s %s %s/%s"):format(d.playing and "▶" or "⏸", name, mmss(progress), mmss(d.duration_ms))
   return (text:gsub("%%", "%%%%")) -- a "%" in a title would be read as a statusline item

@@ -152,7 +152,16 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		if len(args) < 2 {
 			return errors.New("play-uri needs a Spotify URI")
 		}
-		return playURI(ctx, c, args[1])
+		contextURI := ""
+		if len(args) > 2 {
+			contextURI = args[2]
+		}
+		return playURI(ctx, c, args[1], contextURI)
+	case "queue":
+		if len(args) > 1 {
+			return c.AddToQueue(ctx, args[1])
+		}
+		return printQueue(ctx, c, asJSON)
 	case "playlists":
 		if asJSON {
 			return printPlaylistsJSON(ctx, c)
@@ -177,6 +186,9 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 		}
 		return playLikedSongs(ctx, c, n)
 	case "recent":
+		if asJSON {
+			return printRecentJSON(ctx, c)
+		}
 		return printRecent(ctx, c)
 	case "search":
 		if len(args) < 2 {

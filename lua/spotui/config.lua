@@ -30,6 +30,7 @@ M.defaults = {
     search = "<leader>m/",
     liked = "<leader>mL",
     playlists = "<leader>mP",
+    recent = "<leader>mR",
     status = "<leader>mi",
   },
 
@@ -40,6 +41,7 @@ M.defaults = {
     interval = 5000, -- ms between polls while something is playing
     idle_interval = 30000, -- ms between polls with no device or after an error
     max_width = 40, -- characters of "title — artist" before it's cut off
+    show_liked = true, -- a ♥ after songs in your Liked Songs
   },
 }
 

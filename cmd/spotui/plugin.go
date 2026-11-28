@@ -39,6 +39,7 @@ func printJSON(v any) error {
 type statusJSON struct {
 	Active     bool     `json:"active"` // false when no device is playing; the rest is then empty
 	Playing    bool     `json:"playing"`
+	Kind       string   `json:"kind,omitempty"` // "track" or "episode"
 	Track      string   `json:"track,omitempty"`
 	Artists    []string `json:"artists,omitempty"`
 	Album      string   `json:"album,omitempty"`
@@ -49,6 +50,7 @@ type statusJSON struct {
 	Volume     int      `json:"volume"`
 	Shuffle    bool     `json:"shuffle"`
 	Repeat     string   `json:"repeat"`
+	Liked      *bool    `json:"liked,omitempty"` // left out for episodes, or if Spotify didn't say
 }
 
 // printStatusJSON prints the playback state. No active device isn't an error
@@ -74,6 +76,13 @@ func printStatusJSON(ctx context.Context, c *spotify.Client) error {
 	if t := st.Track; t != nil {
 		out.Track, out.Artists, out.Album, out.URI = t.Name, t.Artists, t.Album, t.URI
 		out.DurationMS = t.Duration.Milliseconds()
+		out.Kind = "track"
+		if t.Episode {
+			out.Kind = "episode"
+		} else if liked, err := c.Liked(ctx, t.URI); err == nil && len(liked) > 0 {
+			// A failure here only costs the heart, so it isn't an error
+			out.Liked = &liked[0]
+		}
 	}
 	return printJSON(out)
 }
@@ -83,6 +92,10 @@ type itemJSON struct {
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	URI  string `json:"uri"`
+
+	// For a track: the album or playlist to play it within, for
+	// `play-uri URI CONTEXT`. Left out if there's none.
+	Context string `json:"context,omitempty"`
 }
 
 // label formats a track or album as "Name — Artist, Artist"
@@ -99,15 +112,60 @@ func printSearchJSON(ctx context.Context, c *spotify.Client, query string) error
 
 	items := make([]itemJSON, 0, len(res.Tracks.Items)+len(res.Artists.Items)+len(res.Albums.Items))
 	for _, t := range res.Tracks.Items {
-		items = append(items, itemJSON{"track", label(t.Name, t.Artists), t.URI})
+		items = append(items, trackJSON(t, t.AlbumURI))
 	}
 	for _, a := range res.Artists.Items {
-		items = append(items, itemJSON{"artist", a.Name, a.URI})
+		items = append(items, itemJSON{Kind: "artist", Name: a.Name, URI: a.URI})
 	}
 	for _, a := range res.Albums.Items {
-		items = append(items, itemJSON{"album", label(a.Name, a.Artists), a.URI})
+		items = append(items, itemJSON{Kind: "album", Name: label(a.Name, a.Artists), URI: a.URI})
 	}
 	return printJSON(items)
+}
+
+// trackJSON is a track as an itemJSON, to be played within contextURI
+func trackJSON(t spotify.Track, contextURI string) itemJSON {
+	return itemJSON{Kind: "track", Name: label(t.Name, t.Artists), URI: t.URI, Context: contextURI}
+}
+
+// printRecentJSON prints the recently played tracks, newest first, each with
+// what it was played from
+func printRecentJSON(ctx context.Context, c *spotify.Client) error {
+	plays, err := c.RecentlyPlayed(ctx)
+	if err != nil {
+		return err
+	}
+
+	items := make([]itemJSON, len(plays))
+	for i, p := range plays {
+		items[i] = trackJSON(p.Track, p.ContextURI)
+	}
+	return printJSON(items)
+}
+
+// printQueue prints what's up next
+func printQueue(ctx context.Context, c *spotify.Client, asJSON bool) error {
+	tracks, err := c.Queue(ctx)
+	if err != nil {
+		return err
+	}
+
+	if asJSON {
+		items := make([]itemJSON, len(tracks))
+		for i, t := range tracks {
+			items[i] = trackJSON(t, "")
+		}
+		return printJSON(items)
+	}
+
+	if len(tracks) == 0 {
+		fmt.Println("the queue is empty")
+		return nil
+	}
+	for i, t := range tracks {
+		fmt.Printf("%3d. %s by %s\n", i+1, t.Name, strings.Join(t.Artists, ", "))
+	}
+	return nil
 }
 
 // printPlaylistsJSON prints every playlist the user has
@@ -119,7 +177,7 @@ func printPlaylistsJSON(ctx context.Context, c *spotify.Client) error {
 			return err
 		}
 		for _, p := range page.Items {
-			items = append(items, itemJSON{"playlist", p.Name, p.URI})
+			items = append(items, itemJSON{Kind: "playlist", Name: p.Name, URI: p.URI})
 		}
 		if !page.HasNext || len(page.Items) == 0 {
 			return printJSON(items)
@@ -138,7 +196,7 @@ func printLikedJSON(ctx context.Context, c *spotify.Client) error {
 			return err
 		}
 		for _, t := range page.Items {
-			items = append(items, itemJSON{"track", label(t.Name, t.Artists), t.URI})
+			items = append(items, trackJSON(t, ""))
 		}
 		if !page.HasNext || len(page.Items) == 0 {
 			break
@@ -147,10 +205,11 @@ func printLikedJSON(ctx context.Context, c *spotify.Client) error {
 	return printJSON(items[:min(len(items), likedListLimit)])
 }
 
-// playURI plays a track on its own, or an album, artist or playlist from the start
-func playURI(ctx context.Context, c *spotify.Client, uri string) error {
-	if strings.HasPrefix(uri, "spotify:track:") {
-		return c.PlayTracks(ctx, []string{uri}, 0)
+// playURI plays an album, artist or playlist from the start, or a track or
+// episode within contextURI (an album or playlist), or on its own if that's ""
+func playURI(ctx context.Context, c *spotify.Client, uri, contextURI string) error {
+	if strings.HasPrefix(uri, "spotify:track:") || strings.HasPrefix(uri, "spotify:episode:") {
+		return c.PlayTrackIn(ctx, contextURI, uri)
 	}
 	return c.PlayContext(ctx, uri, 0)
 }
@@ -165,6 +224,9 @@ func setLike(ctx context.Context, c *spotify.Client, mode string) error {
 		return errors.New("nothing playing")
 	}
 	t := st.Track
+	if t.Episode {
+		return errors.New("only songs can be liked")
+	}
 
 	want := mode == "like"
 	if mode == "togglelike" {

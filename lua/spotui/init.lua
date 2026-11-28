@@ -44,6 +44,9 @@ M.actions = {
   playlists = function()
     require("spotui.pickers").playlists()
   end,
+  recent = function()
+    require("spotui.pickers").recent()
+  end,
   status = command({ "status" }),
 }
 
@@ -62,6 +65,7 @@ local descriptions = {
   search = "Search and play",
   liked = "Play from Liked Songs",
   playlists = "Play a playlist",
+  recent = "Play a recent track",
   status = "What's playing",
 }
 
@@ -79,12 +83,16 @@ local subcommands = {
   playlists = function()
     require("spotui.pickers").playlists()
   end,
+  recent = function()
+    require("spotui.pickers").recent()
+  end,
 }
 
 ---Names offered when completing :Spotui
 local completions = {
   "toggle", "play", "pause", "next", "prev", "seek", "vol", "shuffle", "repeat",
-  "like", "unlike", "togglelike", "search", "liked", "playlists", "recent", "status",
+  "like", "unlike", "togglelike", "search", "liked", "playlists", "recent", "queue",
+  "status", "login", "logout", "help",
 }
 
 ---Runs :Spotui. With no arguments it toggles the window; anything else is a

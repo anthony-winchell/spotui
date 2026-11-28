@@ -52,7 +52,7 @@ function M.search(query)
       return cli.report(err, "")
     end
     pick(items, "Play: " .. query, function(item)
-      play({ "play-uri", item.uri })
+      M.play_item(item)
     end)
   end)
 end
@@ -79,6 +79,30 @@ function M.playlists()
       play({ "play-uri", item.uri })
     end)
   end)
+end
+
+---Plays from the chosen recently played track, carrying on through the album
+---or playlist it was played from
+function M.recent()
+  cli.json({ "recent" }, function(err, items)
+    if err then
+      return cli.report(err, "")
+    end
+    pick(items, "Recently Played", function(item)
+      M.play_item(item)
+    end)
+  end)
+end
+
+---Plays an item from spotui's JSON output. A track with a context plays
+---within it, so playback carries on through the album or playlist.
+---@param item {uri: string, context?: string}
+function M.play_item(item)
+  local args = { "play-uri", item.uri }
+  if item.context then
+    table.insert(args, item.context)
+  end
+  play(args)
 end
 
 M.play = play
