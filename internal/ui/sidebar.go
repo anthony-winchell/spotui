@@ -7,6 +7,7 @@ type section int
 
 const (
 	sectionNowPlaying section = iota
+	sectionQueue
 	sectionPlaylists
 	sectionLiked
 	sectionRecent
@@ -20,6 +21,8 @@ func (s section) String() string {
 	switch s {
 	case sectionNowPlaying:
 		return "Now Playing"
+	case sectionQueue:
+		return "Queue"
 	case sectionPlaylists:
 		return "Playlists"
 	case sectionLiked:

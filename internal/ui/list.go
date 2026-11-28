@@ -24,7 +24,20 @@ type listData[T any] struct {
 
 // move shifts the cursor by delta, staying within the items
 func (l *listData[T]) move(delta int) {
-	l.cursor = max(0, min(len(l.items)-1, l.cursor+delta))
+	l.moveTo(l.cursor + delta)
+}
+
+// moveTo puts the cursor on item i, or as close as the list allows
+func (l *listData[T]) moveTo(i int) {
+	l.cursor = max(0, min(len(l.items)-1, i))
+}
+
+// cursorList is the part of a listData that the movement keys need. Lists
+// hold different item types, so they can't share one listData type, but they
+// all have these methods.
+type cursorList interface {
+	move(delta int)
+	moveTo(i int)
 }
 
 // renderList draws the visible rows of l, at most width cells wide and height rows tall
@@ -33,7 +46,7 @@ func renderList[T any](l listData[T], width, height int, label func(T) string) s
 	case len(l.items) == 0 && l.loading:
 		return dimStyle.Render("Loading...")
 	case len(l.items) == 0 && l.err != nil:
-		return errorStyle.Render("Error: " + l.err.Error())
+		return errorStyle.Render(errorText(l.err))
 	case len(l.items) == 0:
 		return dimStyle.Render("Nothing here.")
 	case height <= 0:
@@ -69,18 +82,24 @@ func (l *listData[T]) needsFetch() bool {
 	}
 }
 
-// next starts fetching l's next page if it needs one; otherwise it returns nil
-func (l *listData[T]) next(fetch func(context.Context, int) (spotify.Page[T], error)) tea.Cmd {
+// next starts fetching l's next page if it needs one; otherwise it returns nil.
+// source names the list, so that the page finds its way back to it: several
+// lists hold tracks, and their pages all arrive as listMsg[spotify.Track].
+func (l *listData[T]) next(source string, fetch func(context.Context, int) (spotify.Page[T], error)) tea.Cmd {
 	if !l.needsFetch() {
 		return nil
 	}
 
 	l.loading = true
-	return fetchPage(fetch, len(l.items))
+	return fetchPage(source, fetch, len(l.items))
 }
 
-// apply adds a fetched page to l
+// apply adds a fetched page to l. A page that arrives when l isn't waiting
+// for one is dropped: it's a duplicate, from before the list was reset.
 func (l *listData[T]) apply(msg listMsg[T]) {
+	if !l.loading {
+		return
+	}
 	l.loading = false
 	l.err = msg.err
 	if msg.err != nil {

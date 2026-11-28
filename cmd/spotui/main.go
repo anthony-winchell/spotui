@@ -70,7 +70,11 @@ func runTUI(cfg config.Config) error {
 		return err
 	}
 
-	_, err = tea.NewProgram(ui.New(client, me.ID)).Run()
+	opts := ui.Options{
+		VolumeStep: cfg.VolumeStep,
+		SeekStep:   time.Duration(cfg.SeekStep) * time.Second,
+	}
+	_, err = tea.NewProgram(ui.New(client, me.ID, opts)).Run()
 	return err
 }
 

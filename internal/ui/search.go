@@ -14,6 +14,7 @@ type searchResult struct {
 	kind  string // "track", "artist", or "album"
 	label string
 	uri   string
+	track spotify.Track // the track, if kind is "track"
 }
 
 // searchKind is which result the search shows
@@ -82,7 +83,7 @@ func searchCmd(c *spotify.Client, query string, kind searchKind, offset int) tea
 func flattenResults(res spotify.SearchResults) []searchResult {
 	out := make([]searchResult, 0, len(res.Tracks.Items)+len(res.Artists.Items)+len(res.Albums.Items))
 	for _, t := range res.Tracks.Items {
-		out = append(out, searchResult{kind: "track", label: trackLabel(t), uri: t.URI})
+		out = append(out, searchResult{kind: "track", label: trackLabel(t), uri: t.URI, track: t})
 	}
 
 	for _, a := range res.Artists.Items {
@@ -97,11 +98,12 @@ func flattenResults(res spotify.SearchResults) []searchResult {
 	return out
 }
 
-// play returns a command that starts playing r
+// play returns a command that starts playing r. A track plays within its
+// album, so playback carries on to the album's next track.
 func (r searchResult) play(c *spotify.Client) tea.Cmd {
 	return runCommand(func(ctx context.Context) error {
 		if r.kind == "track" {
-			return c.PlayTracks(ctx, []string{r.uri}, 0)
+			return c.PlayTrackIn(ctx, r.track.AlbumURI, r.uri)
 		}
 
 		return c.PlayContext(ctx, r.uri, 0)

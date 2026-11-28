@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -29,12 +30,6 @@ const (
 	// confirmTimeout is how long a local change wins over fetched state while waiting for Spotify
 	confirmTimeout = 5 * time.Second
 
-	// volumeStep is how much +/- changes the volume, in percent
-	volumeStep = 5
-
-	// seekStep is how far ,/. jumps
-	seekStep = 5 * time.Second
-
 	// seekTolerance is how close a fetched position must be to ours to count as confirmed
 	seekTolerance = 1500 * time.Millisecond
 
@@ -58,9 +53,19 @@ type Model struct {
 	focus  focus   // panel that receives j/k
 	status status  // short-lived message, e.g. a failed command
 
+	keys     keyMap
+	help     help.Model
+	showHelp bool // the ? screen is up
+
+	volumeStep int           // percent per - or +
+	seekStep   time.Duration // per , or .
+
+	queue     listData[spotify.Track]
 	playlists listData[spotify.Playlist]
 	liked     listData[spotify.Track]
 	recent    listData[spotify.Play]
+
+	view *trackView // an open playlist or album; nil if none
 
 	search      textinput.Model // search box; focused means it captures all keys
 	searchQuery string          // last submitted query
@@ -86,8 +91,21 @@ type Model struct {
 	width, height int // terminal size, from tea.WindowSizeMsg
 }
 
+// Options are the user's settings for the TUI. Zero values mean the default.
+type Options struct {
+	VolumeStep int           // percent per - or +; default 5
+	SeekStep   time.Duration // per , or .; default 5s
+}
+
 // New returns the initial Model
-func New(client *spotify.Client, userID string) Model {
+func New(client *spotify.Client, userID string, opts Options) Model {
+	if opts.VolumeStep <= 0 {
+		opts.VolumeStep = 5
+	}
+	if opts.SeekStep <= 0 {
+		opts.SeekStep = 5 * time.Second
+	}
+
 	in := textinput.New()
 	in.Prompt = "/ "
 	in.Placeholder = "tracks, artists, albums"
@@ -98,7 +116,17 @@ func New(client *spotify.Client, userID string) Model {
 	s.Blurred.Placeholder = dimStyle
 	in.SetStyles(s)
 
-	return Model{client: client, userID: userID, loading: true, fetching: true, search: in} // Init starts a fetch
+	return Model{
+		client:     client,
+		userID:     userID,
+		keys:       newKeyMap(opts.VolumeStep, opts.SeekStep),
+		help:       newHelp(),
+		volumeStep: opts.VolumeStep,
+		seekStep:   opts.SeekStep,
+		loading:    true, // Init starts a fetch
+		fetching:   true,
+		search:     in,
+	}
 }
 
 // Init runs once at startup; its command loads the initial state
@@ -150,6 +178,7 @@ type tickMsg time.Time
 
 // listMsg carries one page of items for a list
 type listMsg[T any] struct {
+	source  string // which list it's for; see listData.next
 	items   []T
 	hasMore bool // Spotify has another page after this one
 	err     error
@@ -209,13 +238,22 @@ func runCommand(fn func(context.Context) error) tea.Cmd {
 }
 
 // fetchPage requests one page of a list starting at offset
-func fetchPage[T any](fetch func(context.Context, int) (spotify.Page[T], error), offset int) tea.Cmd {
+func fetchPage[T any](source string, fetch func(context.Context, int) (spotify.Page[T], error), offset int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 		defer cancel()
 
 		page, err := fetch(ctx, offset)
-		return listMsg[T]{items: page.Items, hasMore: page.HasNext, err: err}
+		return listMsg[T]{source: source, items: page.Items, hasMore: page.HasNext, err: err}
+	}
+}
+
+// queuePage adapts Queue to the shape fetchPage expects. Spotify only returns
+// the next few items, so there is never a next page.
+func queuePage(c *spotify.Client) func(context.Context, int) (spotify.Page[spotify.Track], error) {
+	return func(ctx context.Context, _ int) (spotify.Page[spotify.Track], error) {
+		tracks, err := c.Queue(ctx)
+		return spotify.Page[spotify.Track]{Items: tracks}, err
 	}
 }
 

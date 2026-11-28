@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -17,7 +18,7 @@ const sidebarWidth = 22
 
 const (
 	minWidth  = 50 // sidebar (22) plus usable main panel
-	minHeight = 16 // bottom panel (6) + hints (1) + sidebar (7), plus a little room
+	minHeight = 16 // bottom panel (6) + hints (1) + sidebar (8), plus a little room
 )
 
 // searchWidth is how many cells of the query fit in the main panel
@@ -48,10 +49,10 @@ func (m Model) View() tea.View {
 	mainWidth := max(0, m.width-sidebarWidth)
 
 	mainStyle := m.panel(focusMain).Width(mainWidth).Height(topHeight)
-	main := mainStyle.Render(m.mainPanel(
-		mainWidth-mainStyle.GetHorizontalFrameSize(),
-		topHeight-mainStyle.GetVerticalFrameSize(),
-	))
+	innerHeight := topHeight - mainStyle.GetVerticalFrameSize()
+	content := m.mainPanel(mainWidth-mainStyle.GetHorizontalFrameSize(), innerHeight)
+	// Clip what's inside, not the panel, so the bottom border stays
+	main := mainStyle.Render(lipgloss.NewStyle().MaxHeight(innerHeight).Render(content))
 
 	top := lipgloss.JoinHorizontal(lipgloss.Top,
 		m.panel(focusSidebar).Width(sidebarWidth).Height(topHeight).MaxHeight(topHeight).Render(m.sidebar()),
@@ -63,13 +64,28 @@ func (m Model) View() tea.View {
 
 // mainPanel renders the content for the active section
 func (m Model) mainPanel(width, height int) string {
-	title := titleStyle.Render(m.active.String())
+	clip := lipgloss.NewStyle().MaxWidth(width)
 	bodyHeight := height - 2 // title + blank line
+
+	if m.showHelp {
+		return clip.Render(titleStyle.Render("Keys")) + "\n\n" +
+			m.fullHelp(width) + "\n\n" +
+			dimStyle.Render("Press any key to close")
+	}
+
+	if v := m.openView(); v != nil {
+		title := clip.Render(titleStyle.Render(m.active.String() + " › " + v.title))
+		return title + "\n\n" + renderList(v.tracks, width, bodyHeight, trackLabel)
+	}
+
+	title := titleStyle.Render(m.active.String())
 
 	var body string
 	switch m.active {
 	case sectionNowPlaying:
 		body = m.nowPlayingView(width, bodyHeight)
+	case sectionQueue:
+		body = renderList(m.queue, width, bodyHeight, trackLabel)
 	case sectionPlaylists:
 		body = renderList(m.playlists, width, bodyHeight, func(p spotify.Playlist) string {
 			return p.Name
@@ -183,38 +199,67 @@ func artPlaceholder(width, height int) string {
 	return lipgloss.NewStyle().Width(width).Height(height).Border(lipgloss.RoundedBorder()).BorderForeground(colorComment).Foreground(colorComment).Align(lipgloss.Center, lipgloss.Center).Render("♪")
 }
 
-// hints returns the key help for the current context, as many as fit in the terminal width
-func (m Model) hints() string {
-	var keys []string
+// shortHelp returns the keys for the hint line, most useful first. The
+// help renderer drops whatever doesn't fit; ? shows the rest.
+func (m Model) shortHelp() []key.Binding {
+	k := m.keys
+	if m.search.Focused() {
+		return []key.Binding{k.submit, k.cancel, k.forceQuit}
+	}
+
+	keys := []key.Binding{k.Help}
 	switch {
-	case m.search.Focused():
-		keys = []string{"enter search", "esc cancel", "ctrl+c quit"}
+	case m.showHelp:
+		return append(keys, k.Quit)
 	case m.focus == focusSidebar:
-		keys = []string{"j/k sections", "l open", "/ search"}
+		keys = append(keys, k.move, k.Open, k.Search)
 	default:
-		keys = []string{"j/k move", "enter play", "n/N next/prev", "/ search"}
-		if m.active == sectionSearch && m.searchQuery != "" {
-			keys = append(keys, "tab type")
+		keys = append(keys, k.move)
+		if m.active != sectionQueue {
+			keys = append(keys, k.Play)
+		}
+		if m.canOpen() {
+			keys = append(keys, k.Open)
+		}
+		keys = append(keys, k.Back)
+		if _, ok := m.selectedTrack(); ok {
+			keys = append(keys, k.Enqueue, k.LikeSelected)
+		}
+		if m.active == sectionSearch && m.searchQuery != "" && m.openView() == nil {
+			keys = append(keys, k.SearchType)
 		}
 	}
+	return append(keys, k.PlayPause, k.Next, k.Like, k.Quit)
+}
 
-	if !m.search.Focused() {
-		keys = append(keys, "space pause/play", "esc/h back", ",/. seek", "-/+ vol", "s shuffle", "r repeat", "f like", "q quit")
+// fullHelp renders every key binding in columns, in two rows of columns if
+// they don't all fit side by side
+func (m Model) fullHelp(width int) string {
+	groups := m.keys.fullHelp()
+	h := m.help
+	h.SetWidth(0) // no limit, so the width can be measured
+	if all := h.FullHelpView(groups); lipgloss.Width(all) <= width {
+		return all
 	}
 
-	line := ""
+	h.SetWidth(width)
+	half := (len(groups) + 1) / 2
+	return h.FullHelpView(groups[:half]) + "\n\n" + h.FullHelpView(groups[half:])
+}
 
-	for _, k := range keys {
-		next := k
-		if line != "" {
-			next = line + " • " + k
-		}
-		if lipgloss.Width(next) > m.width {
-			break // keep whole hints only
-		}
-		line = next
+// canOpen reports whether the highlighted item can be opened
+func (m Model) canOpen() bool {
+	if m.openView() != nil {
+		return false
 	}
-	return line
+	switch m.active {
+	case sectionPlaylists:
+		return len(m.playlists.items) > 0
+	case sectionSearch:
+		r, ok := m.results.selected()
+		return ok && (r.kind == "album" || r.kind == "track" && r.track.AlbumURI != "")
+	}
+	return false
 }
 
 // searchTabs renders the result kinds, highlighting the selected one
@@ -244,7 +289,9 @@ func (m Model) statusLine(now time.Time) string {
 		}
 		return line.Render(text)
 	}
-	return dimStyle.Render(m.hints())
+	h := m.help
+	h.SetWidth(m.width)
+	return h.ShortHelpView(m.shortHelp())
 }
 
 // trackDetails renders the current track's details, at most width cells wide

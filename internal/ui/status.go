@@ -40,6 +40,8 @@ func errorText(err error) string {
 		return "No active device: open Spotify and start playing something"
 	case errors.Is(err, spotify.ErrPremiumRequired):
 		return "That needs Spotify Premium"
+	case errors.Is(err, spotify.ErrPlaylistHidden):
+		return "Spotify only lists the tracks of playlists you own or collaborate on. Enter plays it from the start."
 	case errors.Is(err, context.DeadlineExceeded):
 		return "Spotify didn't respond in time"
 	case errors.As(err, &ae) && ae.StatusCode == http.StatusTooManyRequests:
