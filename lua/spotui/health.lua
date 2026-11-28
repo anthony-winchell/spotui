@@ -27,7 +27,7 @@ function M.check()
   else
     local msg = vim.trim(res.stderr or ""):gsub("^spotui: ", "")
     vim.health.error(msg ~= "" and msg or "status check failed", {
-      "Not signed in? Run :Spotui to sign in through the browser",
+      "Not signed in? Run :Spotui login to sign in through the browser",
       "No client ID? Neovim runs spotui outside the repo, so .env isn't read: put "
         .. "`client_id = \"...\"` in spotui's config.toml (on Windows, %AppData%\\spotui\\config.toml)",
     })

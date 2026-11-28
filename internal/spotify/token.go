@@ -67,11 +67,12 @@ func parseTokenError(resp *http.Response) error {
 }
 
 // exchangeCode trades an authorization code for tokens. PKCE: no client secret.
-func exchangeCode(ctx context.Context, hc *http.Client, tokenURL, clientID, code, verifier string) (Token, error) {
+// redirect must be the redirect URI the login used.
+func exchangeCode(ctx context.Context, hc *http.Client, tokenURL, clientID, redirect, code, verifier string) (Token, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
+	form.Set("redirect_uri", redirect)
 	form.Set("client_id", clientID)
 	form.Set("code_verifier", verifier)
 	return requestToken(ctx, hc, tokenURL, form)

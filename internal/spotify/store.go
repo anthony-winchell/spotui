@@ -63,3 +63,12 @@ func (KeyringStore) Save(tok Token) error {
 
 	return nil
 }
+
+// Clear deletes the saved login. It's not an error if there is none.
+func (KeyringStore) Clear() error {
+	err := keyring.Delete(keyringService, keyringUser)
+	if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return fmt.Errorf("clear credential store: %w", err)
+	}
+	return nil
+}

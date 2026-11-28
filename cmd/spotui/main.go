@@ -19,6 +19,12 @@ import (
 )
 
 func main() {
+	// Help needs no config, so it works before anything is set up
+	if len(os.Args) > 1 && isHelp(os.Args[1]) {
+		fmt.Print(usage)
+		return
+	}
+
 	// Dev convenience: load ./.env into the environment if present.
 	// Real environment variables win; godotenv.Load never overrides them.
 	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -53,7 +59,7 @@ func runTUI(cfg config.Config) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute) // time to log in
 	defer cancel()
 
-	tok, err := spotify.Authenticate(ctx, cfg.ClientID, spotify.KeyringStore{})
+	tok, err := spotify.Authenticate(ctx, cfg.ClientID, cfg.CallbackPort, spotify.KeyringStore{})
 	if err != nil {
 		return err
 	}
@@ -71,6 +77,14 @@ func runTUI(cfg config.Config) error {
 // runCLI runs one command with the saved login. It prints nothing on success
 // unless the command has output, so scripts and the Neovim plugin can use it
 func runCLI(cfg config.Config, args []string) error {
+	// These manage the saved login, so they run without one
+	switch args[0] {
+	case "login":
+		return login(cfg)
+	case "logout":
+		return logout()
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -175,7 +189,7 @@ func runCommand(ctx context.Context, c *spotify.Client, args []string) error {
 	case "like", "unlike", "togglelike":
 		return setLike(ctx, c, args[0])
 	default:
-		return fmt.Errorf("unknown command %q", args[0])
+		return fmt.Errorf("unknown command %q (see spotui help)", args[0])
 	}
 }
 

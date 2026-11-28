@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -30,10 +31,17 @@ func codeChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-const (
-	authorizeEndpoint = "https://accounts.spotify.com/authorize"
-	redirectURI       = "http://127.0.0.1:8888/callback"
-)
+const authorizeEndpoint = "https://accounts.spotify.com/authorize"
+
+// DefaultCallbackPort is the port of the local login callback, unless the
+// config says otherwise
+const DefaultCallbackPort = 8888
+
+// redirectURI is where Spotify sends the browser after login. It must exactly
+// match a redirect URI registered for the app in Spotify's developer dashboard.
+func redirectURI(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+}
 
 // scopes are the permissions requested at login
 var scopes = []string{
@@ -49,11 +57,11 @@ var scopes = []string{
 }
 
 // buildAuthorizeURL returns the Spotify login URL for the PKCE flow.
-func buildAuthorizeURL(clientID, state, challenge string) string {
+func buildAuthorizeURL(clientID, redirect, state, challenge string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("response_type", "code")
-	q.Set("redirect_uri", redirectURI)
+	q.Set("redirect_uri", redirect)
 	q.Set("code_challenge_method", "S256")
 	q.Set("code_challenge", challenge)
 	q.Set("state", state)
@@ -61,23 +69,25 @@ func buildAuthorizeURL(clientID, state, challenge string) string {
 	return authorizeEndpoint + "?" + q.Encode()
 }
 
-// Login runs the browser-based OAuth PKCE flow.
-func Login(ctx context.Context, clientID string) (Token, error) {
-	ln, err := net.Listen("tcp", "127.0.0.1:8888")
+// Login runs the browser-based OAuth PKCE flow, receiving the callback on port
+func Login(ctx context.Context, clientID string, port int) (Token, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
-		return Token{}, fmt.Errorf("start callback server (is port 8888 in use?): %w", err)
+		return Token{}, fmt.Errorf("start callback server (is port %d in use? set callback_port in the config): %w", port, err)
 	}
 
 	verifier := newCodeVerifier()
 	state := rand.Text()
-	authURL := buildAuthorizeURL(clientID, state, codeChallenge(verifier))
+	redirect := redirectURI(port)
+	authURL := buildAuthorizeURL(clientID, redirect, state, codeChallenge(verifier))
 
-	fmt.Println("Opening your browser to log in to Spotify.")
-	fmt.Println("If it doesn't open, visit this URL:")
-	fmt.Println(authURL)
+	// stderr, so commands that log in still print only their result on stdout
+	fmt.Fprintln(os.Stderr, "Opening your browser to log in to Spotify.")
+	fmt.Fprintln(os.Stderr, "If it doesn't open, visit this URL:")
+	fmt.Fprintln(os.Stderr, authURL)
 
 	if err := openBrowser(authURL); err != nil {
-		fmt.Println("Could not open browser:", err)
+		fmt.Fprintln(os.Stderr, "Could not open browser:", err)
 	}
 
 	code, err := waitForCode(ctx, ln, state)
@@ -86,17 +96,18 @@ func Login(ctx context.Context, clientID string) (Token, error) {
 	}
 
 	hc := &http.Client{Timeout: 15 * time.Second}
-	return exchangeCode(ctx, hc, tokenEndpoint, clientID, code, verifier)
+	return exchangeCode(ctx, hc, tokenEndpoint, clientID, redirect, code, verifier)
 }
 
 // Authenticate returns a valid token, reusing the saved login when possible
 // and failing back to the browser login when there is none or it is revoked.
-func Authenticate(ctx context.Context, clientID string, store TokenStore) (Token, error) {
+// port is the login callback's port.
+func Authenticate(ctx context.Context, clientID string, port int, store TokenStore) (Token, error) {
 	hc := &http.Client{Timeout: 15 * time.Second}
 
 	tok, err := resumeLogin(ctx, hc, clientID, store)
 	if errors.Is(err, ErrNoToken) || isInvalidGrant(err) || (err == nil && missingScopes(tok.Scope)) {
-		tok, err = Login(ctx, clientID)
+		tok, err = Login(ctx, clientID, port)
 		if err == nil {
 			err = store.Save(tok)
 		}
